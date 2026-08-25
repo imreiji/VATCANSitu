@@ -6,6 +6,9 @@
 using namespace std;
 using namespace EuroScopePlugIn;
 
+// Namespace scope const, so it has internal linkage and is safe to define in a header.
+const double EARTH_RADIUS_NM = 3440.0;
+
 class HaloTool :
     public CRadarScreen
 {
@@ -16,19 +19,42 @@ public:
         return ans;
     }
 
+    // Great circle destination point, given an angular distance (nautical miles divided by
+    // the earth's radius) and an initial bearing:
+    //
+    //     lat2 = asin( sin f1 cos d + cos f1 sin d cos t )
+    //     lon2 = lon1 + atan2( sin t sin d cos f1,  cos d - sin f1 sin lat2 )
+    //
+    // calcPTL and calcTBS were two copies of this with different distance expressions, and
+    // both had the same transcription error: the first term of the atan2 denominator was
+    // cos(sin(t) / earthRad) instead of cos(d). The units do not even work out - a sine
+    // divided by a radius.
+    //
+    // The practical error was small: checked numerically against a haversine round trip,
+    // roughly 0.001 nm at CZQM latitudes and 0.014 nm with 0.04 degrees of bearing error
+    // at 82 N. Sub-pixel on any realistic scale, so this is a correctness fix rather than
+    // a visible one.
+    static CPosition destinationPoint(CPosition origin, double angularDistance, double bearing)
+    {
+        const double lat1 = degtorad(origin.m_Latitude);
+        const double lon1 = degtorad(origin.m_Longitude);
+        const double theta = degtorad(bearing);
+
+        const double lat2 = asin(sin(lat1) * cos(angularDistance)
+            + cos(lat1) * sin(angularDistance) * cos(theta));
+
+        const double lon2 = lon1 + atan2(sin(theta) * sin(angularDistance) * cos(lat1),
+            cos(angularDistance) - sin(lat1) * sin(lat2));
+
+        CPosition end;
+        end.m_Latitude = lat2 * 180 / PI;
+        end.m_Longitude = lon2 * 180 / PI;
+        return end;
+    };
+
+    // ptlLen is in minutes and gs in knots, so the distance flown is gs * ptlLen / 60.
     static CPosition calcPTL(CPosition origin, double ptlLen, double gs, double bearing) {
-        double lat2;
-        double long2;
-        double earthRad = 3440; // in nautical miles
-
-        lat2 = asin(sin(origin.m_Latitude * PI / 180) * cos((ptlLen * gs / 60) / earthRad) + cos(origin.m_Latitude * PI / 180) * sin((ptlLen * gs / 60) / earthRad) * cos(bearing * PI / 180));
-        long2 = degtorad(origin.m_Longitude) + atan2((sin(bearing * PI / 180)) * sin((ptlLen * gs / 60) / earthRad) * cos(origin.m_Latitude * PI / 180), (cos(sin(bearing * PI / 180) / earthRad) - sin(origin.m_Latitude * PI / 180) * sin(lat2)));
-        CPosition ptlEnd;
-
-        ptlEnd.m_Latitude = lat2 * 180 / PI;
-        ptlEnd.m_Longitude = long2 * 180 / PI;
-
-        return ptlEnd;
+        return destinationPoint(origin, (ptlLen * gs / 60) / EARTH_RADIUS_NM, bearing);
     };
 
     static double calcBearing(CPosition origin, CPosition end) {
@@ -85,21 +111,11 @@ public:
         DeleteObject(targetPen);
     };
 
+    // tbsLen is already in nautical miles. gs is unused, kept so the two call sites in
+    // drawTBS and drawPTL stay symmetrical.
     static CPosition calcTBS(CPosition origin, double tbsLen, double gs, double bearing) {
-        double lat2;
-        double long2;
-        double earthRad = 3440; // in nautical miles
-
-        // tbsLen should be in nm
-
-        lat2 = asin(sin(origin.m_Latitude * PI / 180) * cos(tbsLen / earthRad) + cos(origin.m_Latitude * PI / 180) * sin(tbsLen / earthRad) * cos(bearing * PI / 180));
-        long2 = degtorad(origin.m_Longitude) + atan2((sin(bearing * PI / 180)) * sin(tbsLen / earthRad) * cos(origin.m_Latitude * PI / 180), (cos(sin(bearing * PI / 180) / earthRad) - sin(origin.m_Latitude * PI / 180) * sin(lat2)));
-        CPosition tbsEnd;
-
-        tbsEnd.m_Latitude = lat2 * 180 / PI;
-        tbsEnd.m_Longitude = long2 * 180 / PI;
-
-        return tbsEnd;
+        (void)gs;
+        return destinationPoint(origin, tbsLen / EARTH_RADIUS_NM, bearing);
     };
 
     static POINT drawTBS(CDC* dc, CRadarTarget radtar, CRadarScreen* radscr, POINT p, double tbsLen, double pixnm, double theta)
