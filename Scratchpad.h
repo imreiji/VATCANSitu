@@ -31,53 +31,148 @@
 // not a space matched no branch, left the output string empty, and was then written back
 // unconditionally - silently destroying the controller's remarks.
 
+// IFR release coordination state, stored as a prefix on the same string.
+//
+//   "RREQ ..."  a tower or ground controller has requested release
+//   "RREL ..."  the owning approach or centre controller has granted it
+//
+// This is a third writer of the same field. It was added without knowledge of the SFI
+// layout above, so it simply prepended "RREQ " to whatever was already there and, when
+// toggled off, blanked the entire string before restoring part of it. The two features
+// corrupted each other: once a release was requested the SFI stopped parsing, because the
+// string no longer began with a space.
+//
+// The prefix is kept exactly as it is on the wire. What changes is that it is now parsed
+// back out before the SFI and remarks are read, which is what the existing byte layout
+// always implied - "RREQ " + " X REMARKS" is already how the old code wrote it, it just
+// never read it that way.
+enum class ReleaseState
+{
+    None,
+    Requested,
+    Granted
+};
+
 struct Scratchpad
 {
+    ReleaseState release{ ReleaseState::None };
+
     // '\0' when no SFI is set.
     char sfi{ '\0' };
     std::string remarks;
 };
 
+namespace ScratchpadDetail
+{
+    // Matches a release keyword only when it stands alone or is followed by a space, so
+    // remarks such as "RREQUEST FUEL" are not mistaken for a release marker.
+    inline bool TakeReleasePrefix(const std::string& raw, const char* keyword, std::string& rest)
+    {
+        const std::string key(keyword);
+
+        if (raw.compare(0, key.size(), key) != 0)
+        {
+            return false;
+        }
+
+        if (raw.size() == key.size())
+        {
+            rest.clear();
+            return true;
+        }
+
+        if (raw[key.size()] != ' ')
+        {
+            return false;
+        }
+
+        rest = raw.substr(key.size() + 1);
+        return true;
+    }
+
+    inline void ParseSfiAndRemarks(const std::string& raw, Scratchpad& parsed)
+    {
+        // " X" - SFI with no remarks.
+        if (raw.size() == 2 && raw[0] == ' ')
+        {
+            parsed.sfi = raw[1];
+            return;
+        }
+
+        // " X REMARKS" - SFI followed by remarks.
+        if (raw.size() > 2 && raw[0] == ' ' && raw[2] == ' ')
+        {
+            parsed.sfi = raw[1];
+            parsed.remarks = raw.substr(3);
+            return;
+        }
+
+        // Anything else is remarks, including the empty string and any single character.
+        parsed.remarks = raw;
+    }
+}
+
 inline Scratchpad ParseScratchpad(const std::string& raw)
 {
     Scratchpad parsed;
 
-    // " X" - SFI with no remarks.
-    if (raw.size() == 2 && raw[0] == ' ')
+    std::string rest;
+    if (ScratchpadDetail::TakeReleasePrefix(raw, "RREQ", rest))
     {
-        parsed.sfi = raw[1];
-        return parsed;
+        parsed.release = ReleaseState::Requested;
+    }
+    else if (ScratchpadDetail::TakeReleasePrefix(raw, "RREL", rest))
+    {
+        parsed.release = ReleaseState::Granted;
+    }
+    else
+    {
+        rest = raw;
     }
 
-    // " X REMARKS" - SFI followed by remarks.
-    if (raw.size() > 2 && raw[0] == ' ' && raw[2] == ' ')
-    {
-        parsed.sfi = raw[1];
-        parsed.remarks = raw.substr(3);
-        return parsed;
-    }
-
-    // Anything else is remarks, including the empty string and any single character.
-    parsed.remarks = raw;
+    ScratchpadDetail::ParseSfiAndRemarks(rest, parsed);
     return parsed;
 }
 
 inline std::string FormatScratchpad(const Scratchpad& value)
 {
+    std::string body;
+
     if (value.sfi == '\0')
     {
-        return value.remarks;
+        body = value.remarks;
     }
-
-    if (value.remarks.empty())
+    else if (value.remarks.empty())
     {
-        return std::string(" ") + value.sfi;
+        body = std::string(" ") + value.sfi;
+    }
+    else
+    {
+        body = std::string(" ") + value.sfi + " " + value.remarks;
     }
 
-    return std::string(" ") + value.sfi + " " + value.remarks;
+    if (value.release == ReleaseState::None)
+    {
+        return body;
+    }
+
+    const std::string keyword = (value.release == ReleaseState::Requested) ? "RREQ" : "RREL";
+
+    // No trailing space when there is nothing after the keyword, matching what the
+    // original code wrote for a bare grant.
+    return body.empty() ? keyword : keyword + " " + body;
 }
 
-// Convenience wrappers matching the three edits the UI actually performs.
+// Convenience wrappers matching the edits the UI actually performs. Each parses, changes
+// one field and reformats, so every other field survives - which is the whole point:
+// setting an SFI no longer discards a release request, and vice versa.
+
+inline std::string ScratchpadWithRelease(const std::string& raw, ReleaseState release)
+{
+    Scratchpad value = ParseScratchpad(raw);
+    value.release = release;
+    return FormatScratchpad(value);
+}
 
 inline std::string ScratchpadWithSfi(const std::string& raw, char sfi)
 {
