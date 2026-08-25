@@ -267,8 +267,11 @@ public:
     static unordered_map<string, int> tempTagData;
     static unordered_map<string, clock_t> hoAcceptedTime;
     static map<string, bool> destAirportList;
+    // Published by the VATSIM datafeed worker, read on the main thread. Take
+    // acCapabilityMutex for either.
     static unordered_map<string, bool> acADSB;
     static unordered_map<string, bool> acRVSM;
+    static std::shared_mutex acCapabilityMutex;
 
     static buttonStates menuState;
 

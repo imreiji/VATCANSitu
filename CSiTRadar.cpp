@@ -15,6 +15,7 @@ CRadarScreen* CSiTRadar::m_pRadScr;
 unordered_map<int, ACList> acLists;
 unordered_map<string, bool> CSiTRadar::acADSB;
 unordered_map<string, bool> CSiTRadar::acRVSM;
+std::shared_mutex CSiTRadar::acCapabilityMutex;
 
 CSiTRadar::CSiTRadar()
 {
@@ -111,8 +112,13 @@ CSiTRadar::CSiTRadar()
 	try {
 		if ( (((clock() - menuState.lastWxRefresh) / CLOCKS_PER_SEC) > 600 && (menuState.wxAll || menuState.wxHigh)) ||
 			menuState.lastWxRefresh == 0) {
-			std::future<void> fa = std::async(std::launch::async, wxRadar::GetRainViewerJSON, this);
-			std::future<void> fb = std::async(std::launch::async, wxRadar::parseRadarPNG, this);
+			// These were std::async with named futures, whose destructors block at the end
+			// of this scope - so they never ran concurrently with anything. All they added
+			// was a worker thread calling DisplayUserMessage, which is EuroScope SDK and
+			// has no thread-safety guarantee. Call them directly: identical timing, no
+			// cross-thread SDK use. (parseRadarPNG calls GetRainViewerJSON itself, so the
+			// separate call here was redundant.)
+			wxRadar::parseRadarPNG(this);
 			menuState.lastWxRefresh = clock();
 		}
 		// on intial load, only do once so that asr loading is not slowed (update will happen "on refresh" afterwards)
@@ -181,8 +187,6 @@ CSiTRadar::~CSiTRadar()
 
 void CSiTRadar::OnRefresh(HDC hdc, int phase)
 {
-	std::future<void> fb, fc, fd;
-
 	if (m_pRadScr != this) {
 		m_pRadScr = this;
 
@@ -220,11 +224,12 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 	RECT radarea = GetRadarArea();
 
-	// Get threaded messages
-	for (auto &message : wxRadar::asyncMessages) {
+	// Get threaded messages. Take the whole queue under the lock, then display outside it:
+	// this used to iterate the shared vector while worker threads could push_back into it,
+	// which reallocates and invalidates the iterator being walked here.
+	for (const auto& message : wxRadar::TakeAsyncMessages()) {
 		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Warning", message.reponseMessage.c_str(), true, false, false, false, false);
 	}
-	wxRadar::asyncMessages.clear();
 
 #pragma region timers
 	// time based functions
@@ -237,8 +242,11 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 	if (phase == REFRESH_PHASE_BEFORE_TAGS) {
 		if (((clock() - menuState.lastWxRefresh) / CLOCKS_PER_SEC) > 600 && (menuState.wxAll || menuState.wxHigh)) {
 
-			// autorefresh weather download every 10 minutes
-			fb = std::async(std::launch::async, wxRadar::parseRadarPNG, this);
+			// autorefresh weather download every 10 minutes.
+			// Direct call - see the constructor: the future's destructor blocked anyway,
+			// so this was already synchronous, just on a thread that must not touch the
+			// EuroScope SDK.
+			wxRadar::parseRadarPNG(this);
 			menuState.lastWxRefresh = clock();
 		}
 
@@ -1868,8 +1876,12 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 		if (phase == REFRESH_PHASE_BACK_BITMAP) {
 			if (menuState.wxAll || menuState.wxHigh) {
 
-				std::future<int> wxImg = std::async(std::launch::async, wxRadar::renderRadar, &g, this, menuState.wxAll);
-				// wxRadar::renderRadar( &g, this, menuState.wxAll);
+				// Direct call. As std::async with a named future this blocked here anyway,
+				// so nothing was gained by the thread - but renderRadar drew into a GDI+
+				// Graphics bound to this thread's HDC and made up to 65,025
+				// ConvertCoordFromPositionToPixel calls into the EuroScope SDK from a
+				// worker. Same timing, no cross-thread drawing or SDK use.
+				wxRadar::renderRadar(&g, this, menuState.wxAll);
 			}
 
 			// refresh jurisdictional list on zoom change
@@ -2843,7 +2855,8 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 		
 		if (menuState.lastWxRefresh == 0 || (clock() - menuState.lastWxRefresh) / CLOCKS_PER_SEC > 600) {
 			
-			std::future<void> wxRend = std::async(std::launch::async, wxRadar::parseRadarPNG, this);
+			// Direct call - the future's destructor blocked this click handler anyway.
+			wxRadar::parseRadarPNG(this);
 			menuState.lastWxRefresh = clock();
 		}
 	}
@@ -2855,7 +2868,8 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 		RefreshMapContent();
 
 		if (menuState.lastWxRefresh == 0 || (clock() - menuState.lastWxRefresh) / CLOCKS_PER_SEC > 600) {
-			std::future<void> wxRend = std::async(std::launch::async, wxRadar::parseRadarPNG, this);
+			// Direct call - the future's destructor blocked this click handler anyway.
+			wxRadar::parseRadarPNG(this);
 			menuState.lastWxRefresh = clock();
 		}
 	}
@@ -3271,9 +3285,13 @@ void CSiTRadar::OnAsrContentLoaded(bool Loaded) {
 	} 
 
 	if (menuState.activeRunwaysList.empty()) {
-		std::thread rwyupdate(CSiTRadar::updateActiveRunways, 0);
-		rwyupdate.detach();
-		//std::future<void> future = std::async(std::launch::async, CSiTRadar::updateActiveRunways, 0);
+		// Run on the main thread. As a detached thread this walked the sector file through
+		// the EuroScope SDK and wrote menuState.activeArpt, activeRunwaysList,
+		// activeRunways and inactiveRwyList with no lock, while OnRefresh read activeArpt
+		// from DrawACList - concurrent access to a std::set is undefined behaviour.
+		// OnAirportRunwayActivityChanged already calls this synchronously, so the two
+		// paths now agree. The cost is two sector file walks during ASR load.
+		CSiTRadar::updateActiveRunways(0);
 	}
 
 	// DisplayActiveRunways();
@@ -3351,12 +3369,19 @@ void CSiTRadar::OnFlightPlanFlightPlanDataUpdate(CFlightPlan FlightPlan)
 	// Get information about the Aircraft/Flightplan
 	// check against map
 
+	// Read both capability maps once under a shared lock. These are republished wholesale
+	// by the VATSIM datafeed worker, so an unsynchronised lookup could land mid-rehash.
+	// Using find() also drops the throw-and-swallow pattern that .at() required.
 	bool isRVSM{ false };
-	try {
-		isRVSM = CSiTRadar::acRVSM.at(callSign);      // vector::at throws an out-of-range
-	}
-	catch (const std::out_of_range& oor) {
+	bool isADSBFromFeed{ false };
+	{
+		std::shared_lock<std::shared_mutex> capabilityLock(CSiTRadar::acCapabilityMutex);
 
+		auto rvsmEntry = CSiTRadar::acRVSM.find(callSign);
+		if (rvsmEntry != CSiTRadar::acRVSM.end()) { isRVSM = rvsmEntry->second; }
+
+		auto adsbEntry = CSiTRadar::acADSB.find(callSign);
+		if (adsbEntry != CSiTRadar::acADSB.end()) { isADSBFromFeed = adsbEntry->second; }
 	}
 
 	// first check for ICAO; then check FAA
@@ -3366,13 +3391,7 @@ void CSiTRadar::OnFlightPlanFlightPlanDataUpdate(CFlightPlan FlightPlan)
 		isRVSM = TRUE;
 	}
 
-	bool isADSB{ false };
-	try {
-		isADSB = CSiTRadar::acADSB.at(callSign);      // vector::at throws an out-of-range
-	}
-	catch (const std::out_of_range& oor) {
-		
-	}
+	bool isADSB = isADSBFromFeed;
 
 	string remarks = FlightPlan.GetFlightPlanData().GetRemarks();
 	

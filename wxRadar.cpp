@@ -9,9 +9,26 @@ string wxRadar::ts;
 std::map<string, string> wxRadar::arptAltimeter;
 std::map<string, string> wxRadar::arptAtisLetter;
 std::vector<CAsyncResponse> wxRadar::asyncMessages;
+std::mutex wxRadar::asyncMessagesMutex;
 std::shared_mutex wxRadar::altimeterMutex;
 std::shared_mutex wxRadar::atisLetterMutex;
 json wxRadar::jsVatsimDataFeed;
+
+void wxRadar::PushAsyncMessage(const CAsyncResponse& message)
+{
+    std::lock_guard<std::mutex> lock(asyncMessagesMutex);
+    asyncMessages.push_back(message);
+}
+
+std::vector<CAsyncResponse> wxRadar::TakeAsyncMessages()
+{
+    std::vector<CAsyncResponse> taken;
+    {
+        std::lock_guard<std::mutex> lock(asyncMessagesMutex);
+        taken.swap(asyncMessages);
+    }
+    return taken;
+}
 
 void wxRadar::loadPNG(std::vector<unsigned char>& buffer, const std::string& filename) //designed for loading files from hard disk in an std::vector
 {
@@ -222,7 +239,7 @@ void wxRadar::parseVatsimMetar(int i) {
         if (res == CURLE_OPERATION_TIMEDOUT) {
             response.reponseMessage = "METAR Fetch Timed Out";
             response.responseCode = 1;
-            wxRadar::asyncMessages.push_back(response);
+            wxRadar::PushAsyncMessage(response);
         }
         curl_easy_cleanup(metarCurlHandle);
     }
@@ -250,7 +267,7 @@ void wxRadar::parseVatsimMetar(int i) {
     catch (exception& e) {
         response.reponseMessage = e.what();
         response.responseCode = 1;
-        wxRadar::asyncMessages.push_back(response);
+        wxRadar::PushAsyncMessage(response);
     }
 
     altimeterMutex.unlock();
@@ -300,12 +317,16 @@ void wxRadar::parseVatsimATIS(int i) {
         if (res == CURLE_OPERATION_TIMEDOUT) {
             result.reponseMessage = "VATSIM Datafeed Timed Out - ATIS letter may be incorrect";
             result.responseCode = 1;
-            asyncMessages.push_back(result);
+            PushAsyncMessage(result);
             // vatsimURL was already cleaned above; this handle was not.
             curl_easy_cleanup(atisVatsimStatusJson);
             return;
         }
         else {
+            // Clear under the lock. This ran outside any lock while the main thread could
+            // be reading the same map under a shared_lock in DrawACList, which made the
+            // locking below pointless: the writer was mutating it unsynchronised.
+            std::unique_lock<shared_mutex> clearLock(atisLetterMutex);
             arptAtisLetter.clear();
         }
         curl_easy_cleanup(atisVatsimStatusJson);
@@ -317,12 +338,13 @@ void wxRadar::parseVatsimATIS(int i) {
         wxRadar::jsVatsimDataFeed = json::parse(jsAtis.c_str());
 
         if (!wxRadar::jsVatsimDataFeed["pilots"].empty()) {
-            
-            // NOTE: must be clear(), not empty(). empty() is a query whose result was
-            // being discarded, and emplace() below does not overwrite an existing key,
-            // so every aircraft's ADS-B/RVSM flag was frozen at its first-ever value.
-            CSiTRadar::acADSB.clear();
-            CSiTRadar::acRVSM.clear();
+
+            // Build into locals, then publish with a swap under the lock. These maps are
+            // read from the main thread in OnFlightPlanFlightPlanDataUpdate; clearing and
+            // repopulating them in place from this worker meant the main thread could be
+            // looking up a callsign in a map that was mid-rehash.
+            std::unordered_map<string, bool> newADSB;
+            std::unordered_map<string, bool> newRVSM;
 
             // make an internal copy of the data feed, but keep it clean for info needed callsign and capabilities
             for (auto& pilot : wxRadar::jsVatsimDataFeed["pilots"]) {
@@ -334,10 +356,14 @@ void wxRadar::parseVatsimATIS(int i) {
                     regex icaoRVSM("(.*)\\/(.*)\\-(.*)[W](.*)\\/(.*)", regex::icase);
                     bool isRVSM = regex_search(icaoACData, icaoRVSM);
 
-                    CSiTRadar::acADSB.emplace(std::make_pair(pilot["callsign"], isADSB));
-                    CSiTRadar::acRVSM.emplace(std::make_pair(pilot["callsign"], isRVSM));
+                    newADSB.emplace(std::make_pair(pilot["callsign"], isADSB));
+                    newRVSM.emplace(std::make_pair(pilot["callsign"], isRVSM));
                 }
             }
+
+            std::unique_lock<shared_mutex> capabilityLock(CSiTRadar::acCapabilityMutex);
+            CSiTRadar::acADSB.swap(newADSB);
+            CSiTRadar::acRVSM.swap(newRVSM);
         }
 
         std::unique_lock<shared_mutex> lock(atisLetterMutex);
@@ -352,7 +378,7 @@ void wxRadar::parseVatsimATIS(int i) {
         }
         lock.unlock();
     }
-    catch (exception& e) { result.reponseMessage = e.what(); result.responseCode = 1; asyncMessages.push_back(result); return; }
+    catch (exception& e) { result.reponseMessage = e.what(); result.responseCode = 1; PushAsyncMessage(result); return; }
 
     return;
 }
