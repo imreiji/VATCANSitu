@@ -60,6 +60,8 @@ void wxRadar::parseRadarPNG(CRadarScreen* rad) {
         }
     }
     else {
+        // Was a bare return, which skipped the cleanup below and leaked the handle.
+        curl_easy_cleanup(pngDL);
         return;
     }
 
@@ -272,6 +274,9 @@ void wxRadar::parseVatsimATIS(int i) {
             result.reponseMessage = "VATSIM Datafeed URL Fetch Timed Out";
             result.responseCode = 1;
             //asyncMessages.insert(result);
+            // Both handles are still open on this path; the bare return leaked them.
+            curl_easy_cleanup(vatsimURL);
+            curl_easy_cleanup(atisVatsimStatusJson);
             return;
         }
         curl_easy_cleanup(vatsimURL);
@@ -296,6 +301,8 @@ void wxRadar::parseVatsimATIS(int i) {
             result.reponseMessage = "VATSIM Datafeed Timed Out - ATIS letter may be incorrect";
             result.responseCode = 1;
             asyncMessages.push_back(result);
+            // vatsimURL was already cleaned above; this handle was not.
+            curl_easy_cleanup(atisVatsimStatusJson);
             return;
         }
         else {

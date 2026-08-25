@@ -632,24 +632,24 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 				setSpeed = setSpeed.insert(0, "A");
 				dc->DrawText(setSpeed.c_str(), &rline2, DT_LEFT | DT_CALCRECT);
 				dc->DrawText(setSpeed.c_str(), &rline2, DT_LEFT);
-				rline2.left = rline2.right + 8;
 				rad->AddScreenObject(TAG_ITEM_TYPE_ASSIGNED_HEADING, fp->GetCallsign(), rline2, TRUE, "");
+				rline2.left = rline2.right + 8;
 			}
 			else if (fp->GetControllerAssignedData().GetAssignedMach() != 0)
 			{
 				setMach = setMach.insert(0, "A.");
 				dc->DrawText(setMach.c_str(), &rline2, DT_LEFT | DT_CALCRECT);
 				dc->DrawText(setMach.c_str(), &rline2, DT_LEFT);
-				rline2.left = rline2.right + 8;
 				rad->AddScreenObject(TAG_ITEM_TYPE_ASSIGNED_HEADING, fp->GetCallsign(), rline2, TRUE, "");
+				rline2.left = rline2.right + 8;
 			}
 			else
 			{
 				adsbMach = adsbMach.insert(0, "M.");
 				dc->DrawText(adsbMach.c_str(), &rline2, DT_LEFT | DT_CALCRECT);
 				dc->DrawText(adsbMach.c_str(), &rline2, DT_LEFT);
-				rline2.left = rline2.right + 8;
 				rad->AddScreenObject(TAG_ITEM_TYPE_ASSIGNED_HEADING, fp->GetCallsign(), rline2, TRUE, "");
+				rline2.left = rline2.right + 8;
 			}
 		}
 		else
@@ -659,16 +659,16 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 				setSpeed = setSpeed.insert(0, "A");
 				dc->DrawText(setSpeed.c_str(), &rline2, DT_LEFT | DT_CALCRECT);
 				dc->DrawText(setSpeed.c_str(), &rline2, DT_LEFT);
-				rline2.left = rline2.right + 8;
 				rad->AddScreenObject(TAG_ITEM_TYPE_ASSIGNED_HEADING, fp->GetCallsign(), rline2, TRUE, "");
+				rline2.left = rline2.right + 8;
 			}
 			if (fp->GetControllerAssignedData().GetAssignedMach() != 0)
 			{
 				setMach = setMach.insert(0, "A.");
 				dc->DrawText(setMach.c_str(), &rline2, DT_LEFT | DT_CALCRECT);
 				dc->DrawText(setMach.c_str(), &rline2, DT_LEFT);
-				rline2.left = rline2.right + 8;
 				rad->AddScreenObject(TAG_ITEM_TYPE_ASSIGNED_HEADING, fp->GetCallsign(), rline2, TRUE, "");
+				rline2.left = rline2.right + 8;
 			}
 		}
 
@@ -1542,6 +1542,10 @@ void CACTag::DrawHistoryDots(CDC *dc, CRadarTarget *rt)
 
 	for (int i = 0; i < CSiTRadar::menuState.numHistoryDots; i++)
 	{
+		// A target with fewer stored positions than numHistoryDots returns invalid data
+		// here, which was converted anyway and drawn at a garbage screen position.
+		if (!trailPt.IsValid()) { break; }
+
 		dot = CSiTRadar::m_pRadScr->ConvertCoordFromPositionToPixel(trailPt.GetPosition());
 		RECT r = {dot.x - 1, dot.y - 1, dot.x + 1, dot.y + 1};
 		dc->Ellipse(&r);

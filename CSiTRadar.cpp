@@ -1951,25 +1951,27 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 	if (ObjectType == WINDOW_SCROLL_ARROW_UP) {
 		auto window = GetAppWindowFromObjectId(id);
 		if (window == nullptr) { return; }
-		auto lb = window->GetListBox(atoi(func.c_str()));
-		lb.ScrollUp();
-		lb.listBox_.clear();
-		lb.PopulateDirectListBox(&mAcData[window->m_callsign].acFPRoute, GetPlugIn()->FlightPlanSelect(window->m_callsign.c_str()));
-		window->m_listboxes_.clear();
-		window->m_listboxes_.push_back(lb);
+		// GetListBox now returns a pointer into m_listboxes_, so the list box can be
+		// mutated in place. The old copy-clear-push_back dance existed only because it
+		// returned by value.
+		SListBox* lb = window->GetListBox(atoi(func.c_str()));
+		if (lb == nullptr) { return; }
+
+		lb->ScrollUp();
+		lb->listBox_.clear();
+		lb->PopulateDirectListBox(&mAcData[window->m_callsign].acFPRoute, GetPlugIn()->FlightPlanSelect(window->m_callsign.c_str()));
 		RequestRefresh();
 	}
 
 	if (ObjectType == WINDOW_SCROLL_ARROW_DOWN) {
 		auto window = GetAppWindowFromObjectId(id);
 		if (window == nullptr) { return; }
-		auto lb = window->GetListBox(atoi(func.c_str()));
+		SListBox* lb = window->GetListBox(atoi(func.c_str()));
+		if (lb == nullptr) { return; }
 
-		lb.ScrollDown();
-		lb.listBox_.clear();
-		lb.PopulateDirectListBox(&mAcData[window->m_callsign].acFPRoute, GetPlugIn()->FlightPlanSelect(window->m_callsign.c_str()));
-		window->m_listboxes_.clear();
-		window->m_listboxes_.push_back(lb);
+		lb->ScrollDown();
+		lb->listBox_.clear();
+		lb->PopulateDirectListBox(&mAcData[window->m_callsign].acFPRoute, GetPlugIn()->FlightPlanSelect(window->m_callsign.c_str()));
 		RequestRefresh();
 	}
 
@@ -2459,14 +2461,22 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 		if (!strcmp(sObjectId, "AcceptPointOut")) {
 			menuState.MB3menu = false;
 
-			CSiTRadar::mAcData[sObjectId].pointOutPendingApproval = false;
-			GetPlugIn()->SetASELAircraft(GetPlugIn()->FlightPlanSelect(sObjectId));
-			string poTarget = GetPlugIn()->ControllerSelectByPositionId(mAcData[sObjectId].POTarget.c_str()).GetCallsign();
+			// In this branch sObjectId is the menu item's function name, not a callsign.
+			// This block was copy-pasted from the HIGHLIGHT_POINT_OUT_ACCEPT handler,
+			// where sObjectId really is a callsign, and never adapted: it keyed mAcData
+			// on "AcceptPointOut", looked up a flight plan of that name, and sent the
+			// other controller a private message reading "acceptpointout ok".
+			string callsign = GetPlugIn()->FlightPlanSelectASEL().GetCallsign();
+			if (callsign.empty()) { return; }
+
+			CSiTRadar::mAcData[callsign].pointOutPendingApproval = false;
+			GetPlugIn()->SetASELAircraft(GetPlugIn()->FlightPlanSelect(callsign.c_str()));
+			string poTarget = GetPlugIn()->ControllerSelectByPositionId(mAcData[callsign].POTarget.c_str()).GetCallsign();
 			for (auto& c : poTarget) {
 				c = std::tolower(c);
 			}
 			poTarget = ".chat " + poTarget;
-			string poMessage = sObjectId;
+			string poMessage = callsign;
 			for (auto& c : poMessage) {
 				c = std::tolower(c);
 			}
@@ -2481,13 +2491,20 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 
 	if (ObjectType == BUTTON_MENU_RMB_MENU_SECONDARY) {
 		if (!strcmp(menuState.MB3SecondaryMenuType.c_str(), "ManHandoff")) {
-			GetPlugIn()->FlightPlanSelectASEL().InitiateHandoff(GetPlugIn()->ControllerSelectByPositionId(sObjectId).GetCallsign());
 			menuState.MB3menu = false;
+
+			// "EXP" opens the manual CJS entry dialog; it is not a position id. The
+			// InitiateHandoff below used to run first regardless, so choosing EXP tried
+			// to hand the aircraft to a position literally called "EXP" before opening
+			// the dialog.
 			if (!strcmp(sObjectId, "EXP")) {
 				ClearFocusedTextFields();
 				CAppWindows extCJS(Pt, WINDOW_HANDOFF_EXT_CJS, GetPlugIn()->FlightPlanSelectASEL(), GetRadarArea());
 				menuState.radarScrWindows[extCJS.m_windowId_] = extCJS;
+				return;
 			}
+
+			GetPlugIn()->FlightPlanSelectASEL().InitiateHandoff(GetPlugIn()->ControllerSelectByPositionId(sObjectId).GetCallsign());
 		}
 		if (!strcmp(menuState.MB3SecondaryMenuType.c_str(), "ModSFI")) {
 			ModifySFI(sObjectId, GetPlugIn()->FlightPlanSelectASEL());
@@ -3010,7 +3027,11 @@ void CSiTRadar::OnMoveScreenObject(int ObjectType, const char* sObjectId, POINT 
 			auto it = std::find_if(menuState.freetext.begin(), menuState.freetext.end(), [i](const SFreeText& s) {
 				return s.m_id == i;
 				});
-			it->m_pos = ConvertCoordFromPixelToPosition({ Pt.x - ((Area.right - Area.left) / 2), Pt.y - ((Area.bottom - Area.top) / 2) });
+			// The result was dereferenced without checking for end(). A drag on a free
+			// text item that had just been cleared wrote through the end iterator.
+			if (it != menuState.freetext.end()) {
+				it->m_pos = ConvertCoordFromPixelToPosition({ Pt.x - ((Area.right - Area.left) / 2), Pt.y - ((Area.bottom - Area.top) / 2) });
+			}
 
 		}
 
