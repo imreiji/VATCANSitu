@@ -231,8 +231,12 @@ struct SListBox {
 		}
 	}
 
-	SListBoxElement GetListBoxElement(const char* elementID){
-		return *find_if(listBox_.begin(), listBox_.end(), [&elementID](const SListBoxElement& obj) { return !strcmp(obj.m_ListBoxElementText.c_str(), elementID); });
+	// Returns nullptr when no element matches. This previously dereferenced the result of
+	// find_if without comparing it to end() and returned a copy, so a miss was undefined
+	// behaviour. Currently unused, but left safe rather than left as a trap.
+	SListBoxElement* GetListBoxElement(const char* elementID) {
+		auto it = find_if(listBox_.begin(), listBox_.end(), [&elementID](const SListBoxElement& obj) { return !strcmp(obj.m_ListBoxElementText.c_str(), elementID); });
+		return (it != listBox_.end()) ? &(*it) : nullptr;
 	}
 };
 
@@ -305,8 +309,12 @@ public:
 	CAppWindows(POINT origin, int winType, CFlightPlan fp, RECT radarea, ACRoute* rte);
 	CAppWindows(POINT origin, int winType, CFlightPlan fp, RECT radarea);
 	CAppWindows(POINT origin, int winType, RECT radarea);
-	SListBox GetListBox(int id) {
-		return *find_if(m_listboxes_.begin(), m_listboxes_.end(), [&id](const SListBox& obj) { return obj.m_ListBoxID == id; });
+	// Returns nullptr when no list box matches. This previously dereferenced the result of
+	// find_if without comparing it to end(), and returned a copy - so callers had to
+	// mutate the copy and then swap it back into m_listboxes_ to keep their changes.
+	SListBox* GetListBox(int id) {
+		auto it = find_if(m_listboxes_.begin(), m_listboxes_.end(), [&id](const SListBox& obj) { return obj.m_ListBoxID == id; });
+		return (it != m_listboxes_.end()) ? &(*it) : nullptr;
 	}
 	SWindowElements DrawWindow(CDC* dc);
 

@@ -39,7 +39,15 @@ void CFontHelper::CreateFonts()
 }
 
 void CFontHelper::DeleteFonts() {
-	DeleteObject(CFontHelper::Euroscope14);
-	DeleteObject(CFontHelper::Euroscope16);
-	DeleteObject(CFontHelper::EuroscopeBold);
+	// These are MFC CFont objects, whose destructors already call DeleteObject when the
+	// statics are torn down at DLL unload. Passing them to the Win32 DeleteObject here
+	// freed each handle a second time - and by then the handle may have been reused.
+	// Segoe12 and Segoe14 were never in the list at all, which is what made the
+	// asymmetry visible. Use the MFC member, which also nulls the internal handle so the
+	// destructor becomes a no-op.
+	CFontHelper::Euroscope14.DeleteObject();
+	CFontHelper::Euroscope16.DeleteObject();
+	CFontHelper::EuroscopeBold.DeleteObject();
+	CFontHelper::Segoe12.DeleteObject();
+	CFontHelper::Segoe14.DeleteObject();
 }
