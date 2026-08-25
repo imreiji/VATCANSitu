@@ -139,6 +139,29 @@ namespace
         return newstring;
     }
 
+    // The original IFR release logic from SituPlugin::OnFunctionCall, reduced to its net
+    // effect on the string. The original wrote the field twice on the clearing paths;
+    // only the final value is modelled here.
+
+    std::string OldToggleRequest(const std::string& sp)
+    {
+        if (sp.compare(0, 4, "RREQ") == 0) {
+            return sp.size() > 4 ? sp.substr(5) : "";
+        }
+        if (sp.compare(0, 4, "RREL") == 0) {
+            return sp.size() > 4 ? sp.substr(5) : "";
+        }
+        return "RREQ " + sp;
+    }
+
+    std::string OldGrantRelease(const std::string& sp)
+    {
+        if (sp.compare(0, 4, "RREQ") == 0) {
+            return sp.size() > 4 ? ("RREL " + sp.substr(5)) : "RREL";
+        }
+        return sp;   // unchanged when there is no outstanding request
+    }
+
     // ---------------------------------------------------------------------------------
 
     const std::vector<std::string>& Corpus()
@@ -154,10 +177,25 @@ namespace
             " X NEW PILOT",
             "NEW PILOT",
             " A B C",
-            // The IFR release feature writes these into the same field.
+        };
+        return corpus;
+    }
+
+    // Release prefixed values are deliberately kept out of the corpus above. The old SFI
+    // code had no concept of a release prefix - it treated "RREQ ABC" as remarks - so a
+    // strict diff against it would report intended behaviour as a regression. Release
+    // handling is covered by its own section, against explicit expectations.
+    const std::vector<std::string>& ReleaseCorpus()
+    {
+        static const std::vector<std::string> corpus = {
             "RREQ",
+            "RREQ ",
+            "RREL",
             "RREQ ABC",
             "RREL SOMETHING",
+            "RREQ  X ABC",
+            "RREL  X NEW PILOT",
+            "RREQ  X",
         };
         return corpus;
     }
@@ -228,10 +266,89 @@ int main()
         p = ParseScratchpad(" X NEW PILOT");
         Check(p.sfi == 'X' && p.remarks == "NEW PILOT", "remarks may contain spaces");
 
-        CheckEqual(FormatScratchpad({ '\0', "" }), "", "format of nothing");
-        CheckEqual(FormatScratchpad({ 'X', "" }), " X", "format of SFI only");
-        CheckEqual(FormatScratchpad({ 'X', "R" }), " X R", "format of SFI and remarks");
-        CheckEqual(FormatScratchpad({ '\0', "R" }), "R", "format of remarks only");
+        CheckEqual(FormatScratchpad({ ReleaseState::None, '\0', "" }), "", "format of nothing");
+        CheckEqual(FormatScratchpad({ ReleaseState::None, 'X', "" }), " X", "format of SFI only");
+        CheckEqual(FormatScratchpad({ ReleaseState::None, 'X', "R" }), " X R", "format of SFI and remarks");
+        CheckEqual(FormatScratchpad({ ReleaseState::None, '\0', "R" }), "R", "format of remarks only");
+    }
+
+    // -- Release state, which shares the same string ------------------------------------
+
+    std::cout << "release state\n";
+    {
+        // Byte compatibility with what the old IFR release code wrote, so scratchpads
+        // already live on the network keep their meaning.
+        Check(ParseScratchpad("RREQ").release == ReleaseState::Requested, "\"RREQ\" alone is a request");
+        Check(ParseScratchpad("RREQ ").release == ReleaseState::Requested, "\"RREQ \" with the trailing space it used to write");
+        Check(ParseScratchpad("RREL").release == ReleaseState::Granted, "\"RREL\" alone is a grant");
+
+        Scratchpad p = ParseScratchpad("RREQ ABC");
+        Check(p.release == ReleaseState::Requested && p.sfi == '\0' && p.remarks == "ABC",
+            "request plus remarks");
+
+        // What the old code produced when an SFI was already present: "RREQ " + " X ABC".
+        // It wrote this and could then never read the SFI back out of it.
+        p = ParseScratchpad("RREQ  X ABC");
+        Check(p.release == ReleaseState::Requested && p.sfi == 'X' && p.remarks == "ABC",
+            "request, SFI and remarks all recovered from a string the old code mangled");
+
+        p = ParseScratchpad("RREQ  X");
+        Check(p.release == ReleaseState::Requested && p.sfi == 'X' && p.remarks.empty(),
+            "request plus SFI, no remarks");
+
+        // The old code used strncmp(.., "RREQ", 4), which matched any remark starting
+        // with those letters.
+        p = ParseScratchpad("RREQUEST FUEL");
+        Check(p.release == ReleaseState::None && p.remarks == "RREQUEST FUEL",
+            "a remark beginning RREQ is not a release request");
+
+        p = ParseScratchpad("RRELAY TO CENTRE");
+        Check(p.release == ReleaseState::None && p.remarks == "RRELAY TO CENTRE",
+            "a remark beginning RREL is not a release grant");
+
+        CheckEqual(FormatScratchpad({ ReleaseState::Requested, '\0', "" }), "RREQ", "bare request has no trailing space");
+        CheckEqual(FormatScratchpad({ ReleaseState::Granted, '\0', "" }), "RREL", "bare grant has no trailing space");
+        CheckEqual(FormatScratchpad({ ReleaseState::Requested, 'X', "ABC" }), "RREQ  X ABC", "request plus SFI plus remarks");
+
+        // The point of the change: the three fields no longer destroy each other.
+        CheckEqual(ScratchpadWithRelease(" X ABC", ReleaseState::Requested), "RREQ  X ABC",
+            "requesting release keeps the SFI and remarks");
+        CheckEqual(ScratchpadWithSfi("RREQ ABC", 'X'), "RREQ  X ABC",
+            "setting an SFI keeps an outstanding request");
+        CheckEqual(ScratchpadWithRemarks("RREQ  X OLD", "NEW"), "RREQ  X NEW",
+            "editing remarks keeps both the request and the SFI");
+        CheckEqual(ScratchpadWithRelease("RREQ  X ABC", ReleaseState::Granted), "RREL  X ABC",
+            "granting keeps the SFI and remarks");
+        CheckEqual(ScratchpadWithRelease("RREQ  X ABC", ReleaseState::None), " X ABC",
+            "clearing the request leaves the SFI and remarks behind");
+        CheckEqual(ScratchpadWithoutSfi("RREQ  X ABC"), "RREQ ABC",
+            "clearing the SFI keeps the request");
+    }
+
+    // -- Every combination survives a round trip ---------------------------------------
+
+    std::cout << "round trip over all field combinations\n";
+    {
+        const ReleaseState releases[] = { ReleaseState::None, ReleaseState::Requested, ReleaseState::Granted };
+        const char sfis[] = { '\0', 'X', '9' };
+        const char* remarkValues[] = { "", "R", "NEW PILOT" };
+
+        for (ReleaseState release : releases)
+        {
+            for (char sfi : sfis)
+            {
+                for (const char* remarks : remarkValues)
+                {
+                    const Scratchpad original{ release, sfi, remarks };
+                    const Scratchpad returned = ParseScratchpad(FormatScratchpad(original));
+
+                    Check(returned.release == original.release
+                        && returned.sfi == original.sfi
+                        && returned.remarks == original.remarks,
+                        "round trip of release/" + std::string(1, sfi ? sfi : '_') + "/" + Show(remarks));
+                }
+            }
+        }
     }
 
     // -- Parsing is stable -------------------------------------------------------------
@@ -319,6 +436,103 @@ int main()
     std::cout << "  " << dataLossFixed << " cases where the old code destroyed data\n";
 
     Check(dataLossFixed > 0, "the corpus actually exercises the data loss bug");
+
+    // -- The release state machine is unchanged ----------------------------------------
+    //
+    // The bytes differ where the old code could not see an SFI inside the tail, but the
+    // state transition itself must match the original exactly, or controllers would see
+    // release behave differently after this change.
+
+    std::cout << "release state machine matches the original\n";
+    {
+        std::vector<std::string> releaseInputs = Corpus();
+        const std::vector<std::string>& withPrefix = ReleaseCorpus();
+        releaseInputs.insert(releaseInputs.end(), withPrefix.begin(), withPrefix.end());
+
+        int preservedMore = 0;
+
+        for (const std::string& raw : releaseInputs)
+        {
+            // Toggle.
+            const ReleaseState current = ParseScratchpad(raw).release;
+            const ReleaseState next = (current == ReleaseState::None)
+                ? ReleaseState::Requested
+                : ReleaseState::None;
+
+            const std::string oldToggled = OldToggleRequest(raw);
+            const std::string newToggled = ScratchpadWithRelease(raw, next);
+
+            Check(ParseScratchpad(oldToggled).release == ParseScratchpad(newToggled).release,
+                "toggle of " + Show(raw) + " reaches the same release state");
+
+            // Grant.
+            const std::string oldGranted = OldGrantRelease(raw);
+            const std::string newGranted =
+                (ParseScratchpad(raw).release == ReleaseState::Requested)
+                ? ScratchpadWithRelease(raw, ReleaseState::Granted)
+                : raw;
+
+            Check(ParseScratchpad(oldGranted).release == ParseScratchpad(newGranted).release,
+                "grant on " + Show(raw) + " reaches the same release state");
+
+            // Where the bytes differ it must be for one of two reasons: the same trailing
+            // space canonicalisation as elsewhere, or the new code keeping an SFI that the
+            // old one buried in the remarks. Anything else is a real behaviour change.
+            if (oldToggled != newToggled)
+            {
+                if (SameMeaning(oldToggled, newToggled))
+                {
+                    ++formattingOnly;
+                }
+                else
+                {
+                    const Scratchpad oldParsed = ParseScratchpad(oldToggled);
+                    const Scratchpad newParsed = ParseScratchpad(newToggled);
+
+                    Check(newParsed.sfi != '\0' && oldParsed.sfi == '\0',
+                        "toggle of " + Show(raw) + " differs only by recovering an SFI: old "
+                        + Show(oldToggled) + " new " + Show(newToggled));
+
+                    ++preservedMore;
+                }
+            }
+        }
+
+        std::cout << "  " << preservedMore << " cases where the new code recovered an SFI the old one lost\n";
+
+        // That count is expected to be zero, and the reason is the whole point of this
+        // change: the old WRITE path was already correct. "RREQ " + " X ABC" produces
+        // exactly the layered encoding the new parser expects. What was broken was
+        // reading it back - the tag item's strncmp and the SFI parser both failed on a
+        // string the release code itself had written. So the bytes on the network never
+        // needed to change; only our ability to interpret them did.
+        //
+        // Assert that directly: everything the old code could write must parse.
+        for (const std::string& raw : releaseInputs)
+        {
+            const std::string oldWrote = OldToggleRequest(raw);
+            const Scratchpad reparsed = ParseScratchpad(oldWrote);
+
+            const bool expectRequest = (ParseScratchpad(raw).release == ReleaseState::None);
+
+            Check(reparsed.release == (expectRequest ? ReleaseState::Requested : ReleaseState::None),
+                "the new parser reads back what the old toggle wrote for " + Show(raw)
+                + " -> " + Show(oldWrote));
+        }
+
+        for (const std::string& raw : ReleaseCorpus())
+        {
+            const Scratchpad before = ParseScratchpad(raw);
+            if (before.release != ReleaseState::Requested) { continue; }
+
+            const Scratchpad afterOldGrant = ParseScratchpad(OldGrantRelease(raw));
+
+            Check(afterOldGrant.release == ReleaseState::Granted
+                && afterOldGrant.sfi == before.sfi
+                && afterOldGrant.remarks == before.remarks,
+                "the new parser reads back what the old grant wrote for " + Show(raw));
+        }
+    }
 
     std::cout << "\n" << (g_checks - g_failures) << "/" << g_checks << " checks passed\n";
 

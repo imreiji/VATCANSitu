@@ -666,20 +666,29 @@ void SituPlugin::OnGetTagItem(EuroScopePlugIn::CFlightPlan FlightPlan,
 
     if (ItemCode == TAG_ITEM_IFR_REL) {
 
-        strcpy_s(sItemString, 16, "\u00AC");
-         *pColorCode = TAG_COLOR_RGB_DEFINED;
-         COLORREF c = C_PPS_ORANGE;
-         *pRGB = c;
+        // Read the release state through the shared parser. The strncmp(..., "RREQ", 4)
+        // this replaced also matched any remark beginning with those four letters, so a
+        // controller remark of "RREQUEST FUEL" rendered as an outstanding release request.
+        const Scratchpad fields = ParseScratchpad(
+            FlightPlan.GetControllerAssignedData().GetScratchPadString());
 
-        if (strncmp(FlightPlan.GetControllerAssignedData().GetScratchPadString(), "RREQ", 4) == 0) {
-            COLORREF c = C_PPS_ORANGE;
+        *pColorCode = TAG_COLOR_RGB_DEFINED;
+
+        switch (fields.release) {
+        case ReleaseState::Requested:
             strcpy_s(sItemString, 16, "\u00A4");
-            *pRGB = c;
-        }
-        if (strncmp(FlightPlan.GetControllerAssignedData().GetScratchPadString(), "RREL", 4) == 0) {
+            *pRGB = C_PPS_ORANGE;
+            break;
+
+        case ReleaseState::Granted:
             strcpy_s(sItemString, 16, "\u00A4");
-            COLORREF c = RGB(9, 171, 0);
-            *pRGB = c;
+            *pRGB = RGB(9, 171, 0);
+            break;
+
+        default:
+            strcpy_s(sItemString, 16, "\u00AC");
+            *pRGB = C_PPS_ORANGE;
+            break;
         }
     }
 
@@ -691,33 +700,30 @@ inline void SituPlugin::OnFunctionCall(int FunctionId, const char* sItemString, 
     fp = FlightPlanSelectASEL();
     string spString = fp.GetControllerAssignedData().GetScratchPadString();
 
+    // Toggle: an outstanding request or an existing grant both clear.
+    //
+    // This used to write the field twice - once with "" and then again with the tail -
+    // so an empty string was briefly published to the network, and any SFI in the tail
+    // was left where the SFI parser could no longer see it. Going through the shared
+    // parser writes once and keeps the SFI and remarks intact either way.
     if (FunctionId == TAG_FUNC_IFR_REL_REQ) {
-        if (strncmp(spString.c_str(), "RREQ", 4) == 0) {
-            fp.GetControllerAssignedData().SetScratchPadString("");
-            if (spString.size() > 4) { fp.GetControllerAssignedData().SetScratchPadString(spString.substr(5).c_str()); }
-        }
-        else if (strncmp(spString.c_str(), "RREL", 4) == 0) {
-            fp.GetControllerAssignedData().SetScratchPadString("");
-            if (spString.size() > 4) { fp.GetControllerAssignedData().SetScratchPadString(spString.substr(5).c_str()); }
-        }
-        else {
-            fp.GetControllerAssignedData().SetScratchPadString(("RREQ " + spString).c_str());
-        }
+        const ReleaseState current = ParseScratchpad(spString).release;
+        const ReleaseState next = (current == ReleaseState::None)
+            ? ReleaseState::Requested
+            : ReleaseState::None;
 
+        fp.GetControllerAssignedData().SetScratchPadString(
+            ScratchpadWithRelease(spString, next).c_str());
     }
+
     if (FunctionId == TAG_FUNC_IFR_RELEASED) {
 
         // Only allow if APP, DEP or CTR
         if (ControllerMyself().GetFacility() >= 5) {
 
-            if (strncmp(fp.GetControllerAssignedData().GetScratchPadString(), "RREQ", 4) == 0) {
-
-                if (spString.size() > 4) {
-                    fp.GetControllerAssignedData().SetScratchPadString(("RREL " + spString.substr(5)).c_str());
-                }
-                else {
-                    fp.GetControllerAssignedData().SetScratchPadString("RREL");
-                }
+            if (ParseScratchpad(spString).release == ReleaseState::Requested) {
+                fp.GetControllerAssignedData().SetScratchPadString(
+                    ScratchpadWithRelease(spString, ReleaseState::Granted).c_str());
             }
         }
     }
