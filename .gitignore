@@ -364,3 +364,7 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 .vscode/Bookmark.bcat
+
+# Build outputs from the standalone scratchpad tests
+ScratchpadTests.exe
+obj/

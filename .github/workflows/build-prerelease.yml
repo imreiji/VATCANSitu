@@ -54,6 +54,17 @@ jobs:
         if (-not $mfc) { throw "afxwin.h still not present after installing the MFC component" }
         Write-Host "Found MFC headers at $($mfc.FullName)"
 
+    # Scratchpad.h depends on nothing but <string>, so these run without MFC or the
+    # EuroScope SDK. They compare the parser against the original hand written logic over
+    # a corpus, which is what makes it safe to change code that writes a field every other
+    # controller on the network can see.
+    - name: Run scratchpad tests
+      shell: cmd
+      run: |
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
+        cl /nologo /EHsc /W4 /std:c++17 tests\ScratchpadTests.cpp /Fe:ScratchpadTests.exe /Fo:obj\ || exit /b 1
+        ScratchpadTests.exe || exit /b 1
+
     - name: Build artifact from source
       run: msbuild "${env:GITHUB_WORKSPACE}\VATCANSitu.vcxproj"
 
