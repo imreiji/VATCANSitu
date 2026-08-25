@@ -4,10 +4,16 @@ on:
   push:
     branches:
       - master
+  # Also build pull requests, so changes get a real compile check before they
+  # reach master rather than after.
+  pull_request:
 
 jobs:
   build:
-    runs-on: windows-2019
+    # windows-2019 was fully unsupported from 2025-06-30 and any job requesting it
+    # fails immediately. windows-2022 still ships the v142 toolset and ATL/MFC that
+    # this project targets.
+    runs-on: windows-2022
     steps:
     - name: Checkout vatcansitu
       uses: actions/checkout@v3
