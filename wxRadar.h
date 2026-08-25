@@ -10,6 +10,7 @@
 #include "curl/curl.h"
 #include "CAsyncResponse.h"
 #include <set>
+#include <mutex>
 #include <shared_mutex>
 
 using namespace Gdiplus;
@@ -561,12 +562,28 @@ public:
     static std::shared_mutex atisLetterMutex;
     static json jsVatsimDataFeed;
 
+private:
+    static vector<CAsyncResponse> asyncMessages;
+    static std::mutex asyncMessagesMutex;
+
+public:
+
     static void loadPNG(std::vector<unsigned char>& buffer, const std::string& filename); //designed for loading files from hard disk in an std::vector
 
     static void parseRadarPNG(CRadarScreen* rad); 
     static int renderRadar(Graphics* g, CRadarScreen* rad, bool showAllPrecip);
 
-    static vector<CAsyncResponse> asyncMessages;
+    // Messages queued by the METAR and ATIS worker threads for the main thread to display.
+    //
+    // Workers used to push_back straight onto this vector while OnRefresh iterated and
+    // cleared it. A reallocation during that iteration invalidated the main thread's
+    // iterator and it read freed memory. Go through these two functions instead; the
+    // vector itself is private to them.
+    static void PushAsyncMessage(const CAsyncResponse& message);
+
+    // Hands the queued messages to the caller and empties the queue, holding the lock only
+    // for the swap so display work happens outside it.
+    static vector<CAsyncResponse> TakeAsyncMessages();
 
     static void GetRainViewerJSON(CRadarScreen* rad) {
 
