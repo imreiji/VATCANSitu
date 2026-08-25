@@ -315,9 +315,10 @@ SWindowElements CAppWindows::DrawWindow(CDC* dc) {
 		textf.RenderTextField(dc, m_origin);
 	}
 
+	// restore, then delete: DeleteObject fails on a still-selected object and leaks it
+	dc->RestoreDC(sDC);
 	DeleteObject(targetPen);
 	DeleteObject(targetBrush);
-	dc->RestoreDC(sDC);
 
 	w.titleBarRect = titleRect;
 	return w;
@@ -362,10 +363,11 @@ void SListBox::RenderListBox(int firstElem, int numElem, int maxElements, POINT 
 	m_dc->Draw3dRect(&totalListBox, C_MENU_GREY2, C_MENU_GREY4);
 	this->m_width = totalListBox.right - totalListBox.left;
 
+	// restore, then delete
+	m_dc->RestoreDC(sDC);
 	DeleteObject(targetPen);
 	DeleteObject(targetBrush);
 	DeleteObject(tb2);
-	m_dc->RestoreDC(sDC);
 }
 
 void STextField::RenderTextField(CDC* m_dc, POINT origin) {
@@ -395,8 +397,9 @@ void STextField::RenderTextField(CDC* m_dc, POINT origin) {
 
 	CopyRect(&m_textRect, &r);
 
+	// restore, then delete
+	m_dc->RestoreDC(sDC);
 	DeleteObject(targetPen);
 	DeleteObject(targetBrush);
 	DeleteObject(tb2);
-	m_dc->RestoreDC(sDC);
 }

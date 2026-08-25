@@ -132,6 +132,11 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		if (CSiTRadar::menuState.destArptOn[distance(CSiTRadar::menuState.destICAO, itr)])
 		{
 
+			// This block sits above the function's own SaveDC, so it needs its own
+			// save/restore: otherwise the pen stays selected, DeleteObject fails and
+			// leaks it, and the selection survives the later RestoreDC.
+			int sDCDest = dc->SaveDC();
+
 			HPEN targetPen = CreatePen(PS_SOLID, 1, C_WHITE);
 			dc->SelectObject(targetPen);
 			dc->SelectStockObject(HOLLOW_BRUSH);
@@ -139,6 +144,7 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 
 			isDest = true;
 
+			dc->RestoreDC(sDCDest);
 			DeleteObject(targetPen);
 		}
 	}
@@ -826,16 +832,22 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 			{
 				conColor = C_WHITE;
 			}
+			// Nested save/restore so the pen is deselected before it is deleted.
+			// The function's outer SaveDC is not enough: it is only restored at the very
+			// end, long after this DeleteObject would have silently failed.
+			int sDCExt = dc->SaveDC();
+
 			targetPen = CreatePen(PS_SOLID, 1, conColor);
 			dc->SelectObject(targetPen);
 
-			
+
 			dc->MoveTo(rline1.right + 5, rline1.top + 7);
 			if (CSiTRadar::menuState.bigACID) {
 				dc->MoveTo(rline1.right + 5, rline1.top + 9);
 			}
 			dc->LineTo((int)doglegX, (int)doglegY);
 
+			dc->RestoreDC(sDCExt);
 			DeleteObject(targetPen);
 		}
 
@@ -846,6 +858,9 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		{
 			conColor = C_WHITE;
 		}
+		// Nested save/restore so the pen is deselected before it is deleted.
+		int sDCLeader = dc->SaveDC();
+
 		targetPen = CreatePen(PS_SOLID, 1, conColor);
 		dc->SelectObject(targetPen);
 		dc->SelectStockObject(NULL_BRUSH);
@@ -860,6 +875,7 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 			dc->Ellipse((int)doglegX - 3, (int)doglegY - 3, (int)doglegX + 4, (int)doglegY + 4);
 		}
 
+		dc->RestoreDC(sDCLeader);
 		DeleteObject(targetPen);
 	}
 
@@ -1168,6 +1184,9 @@ void CACTag::DrawNARDSTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightP
 		{
 			conColor = C_WHITE;
 		}
+		// Nested save/restore so the pen is deselected before it is deleted.
+		int sDCLeader = dc->SaveDC();
+
 		targetPen = CreatePen(PS_SOLID, 1, conColor);
 		dc->SelectObject(targetPen);
 		dc->SelectStockObject(NULL_BRUSH);
@@ -1176,6 +1195,7 @@ void CACTag::DrawNARDSTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightP
 		dc->LineTo((int)doglegX, (int)doglegY);				// line to the dogleg
 		dc->LineTo(connector.x, (int)p.y + tagOffsetY + 7); // line to the connector point
 
+		dc->RestoreDC(sDCLeader);
 		DeleteObject(targetPen);
 	}
 
@@ -1257,6 +1277,9 @@ void CACTag::DrawNARDSTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightP
 			{
 				conColor = C_WHITE;
 			}
+			// Nested save/restore so the pen is deselected before it is deleted.
+			int sDCExt = dc->SaveDC();
+
 			targetPen = CreatePen(PS_SOLID, 1, conColor);
 			dc->SelectObject(targetPen);
 
@@ -1266,6 +1289,7 @@ void CACTag::DrawNARDSTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightP
 			}
 			dc->LineTo((int)doglegX, (int)doglegY);
 
+			dc->RestoreDC(sDCExt);
 			DeleteObject(targetPen);
 		}
 
@@ -1422,10 +1446,9 @@ void CACTag::DrawFPConnector(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlig
 	dc->LineTo((int)doglegX, (int)doglegY);				// line to the dogleg
 	dc->LineTo(connector.x, (int)p.y + tagOffsetY + 7); // line to the connector point
 
-	DeleteObject(targetPen);
-
-	// restore
+	// restore, then delete: DeleteObject fails on a still-selected object and leaks it
 	dc->RestoreDC(sDC);
+	DeleteObject(targetPen);
 }
 
 void CACTag::DrawRTConnector(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPlan *fp, COLORREF color, unordered_map<string, POINT> *tOffset)
@@ -1461,8 +1484,9 @@ void CACTag::DrawHistoryDots(CDC *dc, CRadarTarget *rt)
 		trailPt = rt->GetPreviousPosition(trailPt);
 	}
 
-	DeleteObject(targetPen);
+	// restore, then delete - this runs per target per frame
 	dc->RestoreDC(sDC);
+	DeleteObject(targetPen);
 }
 
 void CACTag::DrawHistoryDots(CDC *dc, CFlightPlan *fp)
@@ -1483,8 +1507,9 @@ void CACTag::DrawHistoryDots(CDC *dc, CFlightPlan *fp)
 		dc->Ellipse(&r);
 	}
 
-	DeleteObject(targetPen);
+	// restore, then delete - this runs per target per frame
 	dc->RestoreDC(sDC);
+	DeleteObject(targetPen);
 }
 
 /* DEBUG CODE

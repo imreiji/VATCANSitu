@@ -53,10 +53,11 @@ public:
         dc->SelectObject(hPen);
 
         dc->Polygon(icon, iconSize);
-        
+
+        // restore, then delete: DeleteObject fails on a still-selected object and leaks it
+        dc->RestoreDC(sDC);
         DeleteObject(iconBrush);
         DeleteObject(hPen);
-        dc->RestoreDC(sDC);
     }
 
     static RECT DrawBut(CDC* dc, menuButton mbut) {
@@ -97,10 +98,10 @@ public:
         dc->Draw3dRect(&rect1, pcolortl, pcolorbr);
         dc->DrawText(mbut.butText.c_str(), &rect1, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
 
+        // restore, then delete
+        dc->RestoreDC(sDC);
         DeleteObject(targetPen);
         DeleteObject(targetBrush);
-
-        dc->RestoreDC(sDC);
 
         return rect1;
     }
@@ -144,10 +145,10 @@ public:
         dc->Draw3dRect(&rect1, pcolortl, pcolorbr);
         dc->DrawText(CString(btext), &rect1, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
 
+        // restore, then delete
+        dc->RestoreDC(sDC);
         DeleteObject(targetPen);
         DeleteObject(targetBrush);
-
-        dc->RestoreDC(sDC);
 
         return rect1;
     };
@@ -157,6 +158,11 @@ public:
     {
         CDC dc;
         dc.Attach(hdc);
+
+        // Save/restore around the whole body. Without it the pen and brush below are
+        // still selected when DeleteObject runs, so the handles leak, and they stay
+        // selected in the caller's shared HDC after Detach.
+        int sDC = dc.SaveDC();
 
         dc.SelectObject(CFontHelper::Segoe12);
         dc.SetTextColor(RGB(230, 230, 230));
@@ -193,6 +199,7 @@ public:
         dc.Draw3dRect(&rect1, pcolortl, pcolorbr);
         dc.DrawText(CString(btext), &rect1, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
 
+        dc.RestoreDC(sDC);
         DeleteObject(targetPen);
         DeleteObject(targetBrush);
 
@@ -205,6 +212,9 @@ public:
         CDC dc;
         dc.Attach(hdc);
 
+        // See DrawButton2: without save/restore these leak and pollute the caller's HDC.
+        int sDC = dc.SaveDC();
+
         COLORREF targetPenColor = RGB(166, 166, 166);
         HPEN targetPen = CreatePen(PS_SOLID, 1, targetPenColor);
         HBRUSH targetBrush = CreateSolidBrush(RGB(66, 66, 66));
@@ -214,6 +224,7 @@ public:
 
         dc.Rectangle(p.x, p.y, p.x + width, p.y + height);
 
+        dc.RestoreDC(sDC);
         DeleteObject(targetPen);
         DeleteObject(targetBrush);
 
@@ -269,6 +280,9 @@ public:
         CDC dc;
         dc.Attach(hdc);
 
+        // See DrawButton2: without save/restore these leak and pollute the caller's HDC.
+        int sDC = dc.SaveDC();
+
         dc.SelectObject(CFontHelper::Segoe12);
         dc.SetTextColor(RGB(230, 230, 230));
 
@@ -299,6 +313,7 @@ public:
         dc.Draw3dRect(&rect1, pcolortl, pcolorbr);
         dc.DrawText(CString(btext), &rect1, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
 
+        dc.RestoreDC(sDC);
         DeleteObject(targetPen);
         DeleteObject(targetBrush);
 
@@ -311,6 +326,9 @@ public:
     static RECT MakeField(HDC hdc, POINT p, int width, int height, const char* btext) {
         CDC dc;
         dc.Attach(hdc);
+
+        // See DrawButton2: without save/restore these leak and pollute the caller's HDC.
+        int sDC = dc.SaveDC();
 
         dc.SelectObject(CFontHelper::Segoe14);
         dc.SetTextColor(RGB(230, 230, 230));
@@ -342,6 +360,7 @@ public:
         dc.Draw3dRect(&rect1, pcolortl, pcolorbr);
         dc.DrawText(CString(btext), &rect1, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
 
+        dc.RestoreDC(sDC);
         DeleteObject(targetPen);
         DeleteObject(targetBrush);
 

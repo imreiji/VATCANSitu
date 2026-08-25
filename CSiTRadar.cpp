@@ -550,6 +550,10 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 					// Draw pending direct to line if exists
 					if (mAcData[callSign].directToLineOn) {
+						// Save/restore so the pen is deselected before it is deleted,
+						// otherwise DeleteObject fails and the handle leaks each frame.
+						int sDCDct = dc.SaveDC();
+
 						HPEN targetPen;
 						targetPen = CreatePen(PS_DASHDOT, 1, C_WHITE);
 						dc.SelectObject(targetPen);
@@ -564,8 +568,8 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 						dc.DrawText(mAcData[callSign].directToPendingFixName.c_str(), &dctFixNameRect, DT_CENTER | DT_CALCRECT);
 						dc.DrawText(mAcData[callSign].directToPendingFixName.c_str(), &dctFixNameRect, DT_CENTER);
 
+						dc.RestoreDC(sDCDct);
 						DeleteObject(targetPen);
-
 					}
 
 					// Get information about the Aircraft/Flightplan
@@ -906,6 +910,9 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 					selectBox.top = p.y - 6;
 					selectBox.bottom = p.y + 7;
 
+					// Save/restore so the pen is deselected before it is deleted below.
+					int sDCSelBox = dc.SaveDC();
+
 					targetPen = CreatePen(PS_SOLID, 1, C_WHITE);
 					dc.SelectObject(targetPen);
 					dc.SelectStockObject(NULL_BRUSH);
@@ -1015,9 +1022,8 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 						}
 					}
 
+					dc.RestoreDC(sDCSelBox);
 					DeleteObject(targetPen);
-
-
 				}
 
 				// Flight plan loop. Goes through flight plans, and if not correlated will display
@@ -1095,9 +1101,11 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 	
 							g.FillPolygon(&orangeBrush, points, 19);
 							g.EndContainer(gCont);
-	
-							DeleteObject(&orangeBrush);
-	
+
+							// orangeBrush is a GDI+ SolidBrush, not a GDI handle. It was
+							// being passed to the Win32 DeleteObject, which took the
+							// address of a C++ stack object as an HGDIOBJ. It destructs on
+							// its own at the end of this scope.
 						}
 	
 					}

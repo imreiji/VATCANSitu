@@ -82,10 +82,11 @@ struct SListBoxScrollBar {
 		dc->Draw3dRect(&downarrow, C_MENU_GREY2, C_MENU_GREY4);
 		dc->Draw3dRect(&slider, C_MENU_GREY4, C_MENU_GREY1);
 
+		// restore, then delete: DeleteObject fails on a still-selected object and leaks it
+		dc->RestoreDC(sDC);
 		DeleteObject(targetPen);
 		DeleteObject(targetBrush);
 		DeleteObject(tb2);
-		dc->RestoreDC(sDC);
 	}
 };
 
@@ -271,10 +272,11 @@ struct SWindowButton {
 		m_dc->DrawText(text.c_str(), &button, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
 		m_dc->Draw3dRect(&button, C_MENU_GREY4, C_MENU_GREY1);
 
+		// restore, then delete
+		m_dc->RestoreDC(sDC);
 		DeleteObject(targetPen);
 		DeleteObject(targetBrush);
 		DeleteObject(tb2);
-		m_dc->RestoreDC(sDC);
 
 		CopyRect(&m_WindowButtonRect, &button);
 	}
