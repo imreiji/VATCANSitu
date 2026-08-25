@@ -810,9 +810,14 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 						if (!radarTarget.GetCorrelatedFlightPlan().GetTrackingControllerIsMe()) {
 							hoAcceptedTime[callSign] = clock();
 
-							// if jurisdiction changes, pointouts are cleared
+							// if jurisdiction changes, pointouts are cleared.
+							// This must act on callSign - the aircraft whose handoff just
+							// completed - not on whatever happens to be selected right now.
+							// It previously used FlightPlanSelectASEL(), so completing any
+							// handoff cleared the point-out annotation on the selected
+							// aircraft and pushed its strip to that aircraft's POTarget.
 							GetPlugIn()->FlightPlanSelect(callSign.c_str()).GetControllerAssignedData().SetFlightStripAnnotation(1, "");
-							SendPointOut(mAcData[GetPlugIn()->FlightPlanSelectASEL().GetCallsign()].POTarget.c_str(), "", &GetPlugIn()->FlightPlanSelect(GetPlugIn()->FlightPlanSelectASEL().GetCallsign()));
+							SendPointOut(mAcData[callSign].POTarget.c_str(), "", &GetPlugIn()->FlightPlanSelect(callSign.c_str()));
 
 							mAcData[callSign].pointOutFromMe = false;
 							mAcData[callSign].pointOutToMe = false;
@@ -3270,7 +3275,6 @@ void CSiTRadar::OnAsrContentLoaded(bool Loaded) {
 void CSiTRadar::OnFlightPlanFlightPlanDataUpdate(CFlightPlan FlightPlan)
 {
 
-	ACData acdata;
 	int count = 0;
 	CSiTRadar::menuState.jurisdictionalAC.clear();
 
@@ -3297,7 +3301,6 @@ void CSiTRadar::OnFlightPlanFlightPlanDataUpdate(CFlightPlan FlightPlan)
 	// These items don't need to be updated each loop, save loop type by storing data in a map
 	string callSign = FlightPlan.GetCallsign();
 
-	acdata.acFPRoute = mAcData[callSign].acFPRoute; // cache so it's not lost
 	bool isVFR = !strcmp(FlightPlan.GetFlightPlanData().GetPlanType(), "V");
 
 	string icaoACData = FlightPlan.GetFlightPlanData().GetAircraftInfo(); // logic to 
@@ -3333,14 +3336,30 @@ void CSiTRadar::OnFlightPlanFlightPlanDataUpdate(CFlightPlan FlightPlan)
 	string origin = FlightPlan.GetFlightPlanData().GetOrigin();
 	string destin = FlightPlan.GetFlightPlanData().GetDestination();
 
+	// Update in place, touching only the fields this callback actually owns.
+	//
+	// This used to build a fresh ACData and assign it over the whole record. EuroScope
+	// fires this callback on ANY flight plan amendment - route, cruise altitude, aircraft
+	// type, remarks - so that assignment silently discarded everything the plugin owns and
+	// EuroScope knows nothing about: the history-dot trail, an in-progress point-out
+	// (pointOutToMe / POTarget / POString / pointOutPendingApproval), a pending direct-to,
+	// the extended-altitude and destination-label toggles, the TBS follower category, the
+	// handoff flags, and the open/closed tag state. Only acFPRoute was hand-copied back.
+	//
+	// A new callsign still gets a value-initialised (zeroed) ACData from operator[].
+	ACData& acdata = mAcData[callSign];
+
 	if (FlightPlan.GetTrackingControllerIsMe()) {
 		acdata.tagType = 1;
 	}
 	acdata.hasVFRFP = isVFR;
-	acdata.isADSB = isADSB;
 	acdata.isRVSM = isRVSM;
-	if (remarks.find("STS/MEDEVAC") != remarks.npos) { acdata.isMedevac = true; }
-	if (remarks.find("STS/ADSB") != remarks.npos) { acdata.isADSB = true; }
+
+	// Recomputed from the current flight plan every call, never latched - assigning rather
+	// than only ever setting true preserves the previous semantics now that the record
+	// carries over between calls.
+	acdata.isADSB = isADSB || (remarks.find("STS/ADSB") != remarks.npos);
+	acdata.isMedevac = (remarks.find("STS/MEDEVAC") != remarks.npos);
 
 	/*
 	if (!origin.empty() && !destin.empty()) {
@@ -3354,10 +3373,6 @@ void CSiTRadar::OnFlightPlanFlightPlanDataUpdate(CFlightPlan FlightPlan)
 		acdata.isADSB = true;
 	}
 	*/
-
-	mAcData[callSign] = acdata;
-
-
 }
 
 void CSiTRadar::OnFlightPlanControllerAssignedDataUpdate(CFlightPlan FlightPlan,
