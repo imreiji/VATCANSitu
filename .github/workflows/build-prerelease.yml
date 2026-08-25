@@ -62,8 +62,9 @@ jobs:
       shell: cmd
       run: |
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-        cl /nologo /EHsc /W4 /std:c++17 tests\ScratchpadTests.cpp /Fe:ScratchpadTests.exe /Fo:obj\ || exit /b 1
-        ScratchpadTests.exe || exit /b 1
+        if not exist testbin md testbin
+        cl /nologo /EHsc /W4 /std:c++17 tests\ScratchpadTests.cpp /Fe:testbin\ScratchpadTests.exe /Fo:testbin\ || exit /b 1
+        testbin\ScratchpadTests.exe || exit /b 1
 
     - name: Build artifact from source
       run: msbuild "${env:GITHUB_WORKSPACE}\VATCANSitu.vcxproj"
