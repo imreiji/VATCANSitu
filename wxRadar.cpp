@@ -72,8 +72,18 @@ void wxRadar::parseRadarPNG(CRadarScreen* rad) {
     unsigned long w, h;
     int error = wxRadar::decodePNG(image, w, h, buffer.empty() ? 0 : &buffer[0], (unsigned long)buffer.size());
 
+    // The loop below indexes `image` as a fixed 256x256 RGBA buffer. decodePNG reports the
+    // actual dimensions, so validate them: a tile that is not exactly 256x256 (server change,
+    // an error page, a truncated download) would otherwise read past the end of the vector.
+    const size_t expectedBytes = 256u * 256u * 4u;
+
     if (error != 0) {
         rad->GetPlugIn()->DisplayUserMessage("VATCAN Situ", "WX Parser", string("PNG Failed to Parse").c_str(), true, false, false, false, false);
+    }
+    else if (w != 256ul || h != 256ul || image.size() < expectedBytes) {
+        rad->GetPlugIn()->DisplayUserMessage("VATCAN Situ", "WX Parser",
+            ("Unexpected radar tile size " + to_string(w) + "x" + to_string(h) + " - discarded").c_str(),
+            true, false, false, false, false);
     }
     else {
 
@@ -301,8 +311,11 @@ void wxRadar::parseVatsimATIS(int i) {
 
         if (!wxRadar::jsVatsimDataFeed["pilots"].empty()) {
             
-            CSiTRadar::acADSB.empty();
-            CSiTRadar::acRVSM.empty();
+            // NOTE: must be clear(), not empty(). empty() is a query whose result was
+            // being discarded, and emplace() below does not overwrite an existing key,
+            // so every aircraft's ADS-B/RVSM flag was frozen at its first-ever value.
+            CSiTRadar::acADSB.clear();
+            CSiTRadar::acRVSM.clear();
 
             // make an internal copy of the data feed, but keep it clean for info needed callsign and capabilities
             for (auto& pilot : wxRadar::jsVatsimDataFeed["pilots"]) {

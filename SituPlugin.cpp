@@ -235,7 +235,11 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     }
                     return -1;
                 }
-
+                // If the key is no longer physically down, fall out of the switch to the
+                // shared "return -1" below and let the key-up branch handle it, exactly as
+                // VK_F9 / VK_SNAPSHOT already do. Without this break, control ran on into
+                // the F3, F4 and ESCAPE cases and cancelled handoff mode.
+                break;
             }
 
             case VK_F3: {
@@ -243,6 +247,7 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     kbF3 = true;
                     return -1;
                 }
+                break;
             }
 
             case VK_F4: {
@@ -253,6 +258,7 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     }
                     return -1;
                 }
+                break;
             }
 
             case VK_ESCAPE: {
@@ -473,7 +479,14 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 }
 
 LRESULT CALLBACK MouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
-    
+
+    // Win32 contract: when nCode < 0 the hook must pass the call straight on without
+    // processing it - wParam/lParam are not guaranteed valid. lParam was previously
+    // dereferenced above this check.
+    if (nCode < 0) {
+        return CallNextHookEx(NULL, nCode, wParam, lParam);
+    }
+
     POINT Pt;
     MOUSEHOOKSTRUCT* mouseStruct = (MOUSEHOOKSTRUCT*)lParam;
     RECT windowRect;
@@ -556,6 +569,11 @@ LRESULT CALLBACK MouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
         } // untoggle h/o if a click happens
 
         switch (wParam) {
+        // A middle double-click delivers DOWN, UP, DBLCLK, UP - the DBLCLK stands in for the
+        // second press, so it has to behave like WM_MBUTTONDOWN. It used to fall through into
+        // WM_RBUTTONDOWN, which left the WM_MBUTTONUP that follows emitting an unmatched
+        // synthetic left-button release (and clobbered the right-click menu anchor point).
+        case WM_MBUTTONDBLCLK:
         case WM_MBUTTONDOWN: {
             CSiTRadar::menuState.mouseMMB = true;
             SendMouseClick(MOUSEEVENTF_LEFTDOWN);
@@ -567,8 +585,6 @@ LRESULT CALLBACK MouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
             SendMouseClick(MOUSEEVENTF_LEFTUP);
             CallNextHookEx(NULL, nCode, wParam, lParam);
             return -1;
-        }
-        case WM_MBUTTONDBLCLK: {
         }
         case WM_RBUTTONDOWN: {
             CSiTRadar::menuState.MB3clickedPt = Pt;
@@ -698,10 +714,12 @@ inline void SituPlugin::OnFunctionCall(int FunctionId, const char* sItemString, 
 
 void SituPlugin::OnAirportRunwayActivityChanged()
 {
+    // DisplayActiveRunways() dereferences m_pRadScr too, so it belongs inside the guard.
+    // ~CSiTRadar sets m_pRadScr back to nullptr, so this is reachable once the last ASR closes.
     if (CSiTRadar::m_pRadScr != nullptr) {
         CSiTRadar::updateActiveRunways(0);
+        CSiTRadar::DisplayActiveRunways();
     }
-    CSiTRadar::DisplayActiveRunways();
 }
 
 void SituPlugin::OnCompilePrivateChat(const char* sSenderCallsign,

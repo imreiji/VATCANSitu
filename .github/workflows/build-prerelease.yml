@@ -4,16 +4,55 @@ on:
   push:
     branches:
       - master
+  # Also build pull requests, so changes get a real compile check before they
+  # reach master rather than after.
+  pull_request:
 
 jobs:
   build:
-    runs-on: windows-2019
+    # windows-2019 was fully unsupported from 2025-06-30 and any job requesting it
+    # fails immediately. windows-2022 still ships the v142 toolset and ATL/MFC that
+    # this project targets.
+    runs-on: windows-2022
     steps:
     - name: Checkout vatcansitu
       uses: actions/checkout@v3
 
     - name: Add msbuild to PATH
       uses: microsoft/setup-msbuild@v2
+
+    # The image ships the v142 toolset but only ATL/MFC for v143, so a v142 build
+    # fails PrepareForBuild with MSB8041. Install the v142 MFC libraries rather than
+    # retargeting the project, so CI keeps building what actually ships.
+    - name: Install MFC for the v142 toolset
+      shell: pwsh
+      run: |
+        $installerDir = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer"
+        $vsPath = & "$installerDir\vswhere.exe" -latest -property installationPath
+        Write-Host "Visual Studio: $vsPath"
+
+        # Invoke through cmd.exe. Passing --installPath straight from a PowerShell
+        # -ArgumentList array mangles the quoting around the space in "Program Files"
+        # and vs_installer rejects it with exit code 87 (ERROR_INVALID_PARAMETER).
+        Set-Location $installerDir
+        $arguments = @(
+          '/c', 'vs_installer.exe', 'modify',
+          '--installPath', "`"$vsPath`"",
+          '--add', 'Microsoft.VisualStudio.Component.VC.14.29.16.11.MFC',
+          '--quiet', '--norestart', '--nocache'
+        )
+        $proc = Start-Process -FilePath cmd.exe -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
+
+        # 3010 means success but a reboot is pending, which does not matter here.
+        if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+          throw "vs_installer failed with exit code $($proc.ExitCode)"
+        }
+
+        # Fail loudly here rather than 20 lines later inside MSBuild.
+        $mfc = Get-ChildItem -Path "$vsPath\VC\Tools\MSVC" -Filter afxwin.h -Recurse -ErrorAction SilentlyContinue |
+               Select-Object -First 1
+        if (-not $mfc) { throw "afxwin.h still not present after installing the MFC component" }
+        Write-Host "Found MFC headers at $($mfc.FullName)"
 
     - name: Build artifact from source
       run: msbuild "${env:GITHUB_WORKSPACE}\VATCANSitu.vcxproj"
