@@ -56,9 +56,10 @@ public:
         dc->SelectStockObject(HOLLOW_BRUSH);
         dc->Ellipse(p.x - pixoffset, p.y - pixoffset, p.x + pixoffset, p.y + pixoffset);
 
-        DeleteObject(targetPen);
-
+        // RestoreDC first: DeleteObject fails on an object still selected into the DC,
+        // and the handle leaks. This runs once per haloed target per frame.
         dc->RestoreDC(sDC);
+        DeleteObject(targetPen);
     };
 
     static void drawPTL(CDC* dc, CRadarTarget radtar, CRadarScreen* radscr, POINT p, double ptlTime)
@@ -78,10 +79,10 @@ public:
         dc->MoveTo(p);
         dc->LineTo(p2);
 
-        DeleteObject(targetPen);
-
+        // RestoreDC before DeleteObject - see drawHalo. With "PTL All" enabled this runs
+        // for every target on every frame, so a leak here burns handles fastest.
         dc->RestoreDC(sDC);
-  
+        DeleteObject(targetPen);
     };
 
     static CPosition calcTBS(CPosition origin, double tbsLen, double gs, double bearing) {
@@ -136,9 +137,9 @@ public:
         dc->MoveTo(tbsp1);
         dc->LineTo(tbsp2);
 
-        DeleteObject(targetPen);
-
+        // RestoreDC before DeleteObject - see drawHalo.
         dc->RestoreDC(sDC);
+        DeleteObject(targetPen);
         return tbsp2;
     };
 };

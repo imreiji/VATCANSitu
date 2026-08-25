@@ -171,6 +171,9 @@ void CPopUpMenu::drawElement(SPopUpElement& element, POINT p) {
     }
 
     if (element.m_hasArrow) {
+        // Nested save/restore so the arrow pens are deselected before being deleted.
+        int sDCArrow = m_dc->SaveDC();
+
         HPEN targetPentl = CreatePen(PS_SOLID, 1, pcolortl);
         HPEN targetPenbr = CreatePen(PS_SOLID, 1, pcolorbr);
         m_dc->SelectObject(targetPentl);
@@ -181,13 +184,13 @@ void CPopUpMenu::drawElement(SPopUpElement& element, POINT p) {
         m_dc->SelectObject(targetPenbr);
         m_dc->LineTo({ rect1.right - 5, rect1.top + 12 });
 
+        m_dc->RestoreDC(sDCArrow);
         DeleteObject(targetPentl);
         DeleteObject(targetPenbr);
-        
     }
 
+    // restore, then delete: DeleteObject fails on a still-selected object and leaks it
+    m_dc->RestoreDC(sDC);
     DeleteObject(targetPen);
     DeleteObject(targetBrush);
-
-    m_dc->RestoreDC(sDC);
 }

@@ -65,6 +65,10 @@ void CACList::DrawList()
 		m_dc->Polygon(vertices, 3);
 	}
 
+	// This function called SaveDC but never restored it, so every call leaked a saved DC
+	// state as well as the pen and brush, which DeleteObject could not free while they
+	// were still selected.
+	m_dc->RestoreDC(sDC);
 	DeleteObject(targetBrush);
 	DeleteObject(targetPen);
 }

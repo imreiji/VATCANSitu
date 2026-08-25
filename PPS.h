@@ -56,11 +56,18 @@ public:
 		case 3: {
 
 			if (!strcmp(squawk.c_str(), "7600") || !strcmp(squawk.c_str(), "7700")) {
+				// Nested save/restore so the brush is deselected before it is deleted.
+				// The outer SaveDC is only restored on the way out of the function, well
+				// after this DeleteObject would have silently failed and leaked.
+				int sDCEmerg = dc->SaveDC();
+
 				HBRUSH targetBrush = CreateSolidBrush(ppsColor);
 				dc->SelectObject(targetBrush);
 
 				POINT vertices[] = { { p.x - 4, p.y + 4 } , { p.x, p.y - 4 } , { p.x + 4,p.y + 4 } }; // Red triangle
 				dc->Polygon(vertices, 3);
+
+				dc->RestoreDC(sDCEmerg);
 				DeleteObject(targetBrush);
 
 				break;
@@ -277,9 +284,9 @@ public:
 		}
 		}
 
-		DeleteObject(targetPen);
-
+		// restore, then delete - this runs for every radar target every frame
 		dc->RestoreDC(sDC);
+		DeleteObject(targetPen);
 		return prect;
 	};
 
