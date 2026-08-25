@@ -3,6 +3,77 @@
 
 using namespace EuroScopePlugIn;
 
+namespace {
+
+	// Cached airport positions from the active sector file.
+	//
+	// Looking up the destination airport used to run inline in DrawRTACTag: a full
+	// SectorFileElementSelectFirst/Next walk over every airport in the sector file, for
+	// every radar target, on every refresh, with no early exit once the match was found.
+	// A Canadian sector file carries hundreds to thousands of airports, so a busy screen
+	// spent six figures of SDK calls per frame to obtain one coordinate. Worse, the walk
+	// sat above the tagType check, so it also ran for closed Bravo tags that never draw a
+	// destination at all.
+	//
+	// The SDK exposes no sector-file-changed notification, so the cache is keyed on the
+	// sector file name and can also be dropped explicitly via
+	// CACTag::InvalidateAirportCache(), which covers reloading a sector file of the same
+	// name. Main thread only, like the rest of the drawing code.
+	std::unordered_map<std::string, CPosition> g_airportPositions;
+	std::string g_airportCacheSectorFile;
+	bool g_airportCacheBuilt = false;
+
+	void RebuildAirportCacheIfNeeded(CRadarScreen* rad)
+	{
+		const char* sectorFile = rad->GetPlugIn()->ControllerMyself().GetSectorFileName();
+		std::string current = (sectorFile != nullptr) ? sectorFile : "";
+
+		if (g_airportCacheBuilt && current == g_airportCacheSectorFile) { return; }
+
+		g_airportPositions.clear();
+
+		rad->GetPlugIn()->SelectActiveSectorfile();
+		for (CSectorElement element = rad->GetPlugIn()->SectorFileElementSelectFirst(SECTOR_ELEMENT_AIRPORT);
+			element.IsValid();
+			element = rad->GetPlugIn()->SectorFileElementSelectNext(element, SECTOR_ELEMENT_AIRPORT))
+		{
+			const char* name = element.GetName();
+			if (name == nullptr || *name == '\0') { continue; }
+
+			CPosition position;
+			if (element.GetPosition(&position, 0))
+			{
+				// Last definition wins, matching the old loop, which kept assigning
+				// rather than breaking on the first match.
+				g_airportPositions[name] = position;
+			}
+		}
+
+		g_airportCacheSectorFile = current;
+		g_airportCacheBuilt = true;
+	}
+
+	// Returns the sector file position for an ICAO code, or a zeroed CPosition when the
+	// airport is absent - the same 0/0 sentinel the caller already tests for.
+	CPosition LookupAirportPosition(CRadarScreen* rad, const std::string& icao)
+	{
+		if (icao.empty()) { return CPosition(); }
+
+		RebuildAirportCacheIfNeeded(rad);
+
+		std::unordered_map<std::string, CPosition>::const_iterator it = g_airportPositions.find(icao);
+		return (it != g_airportPositions.end()) ? it->second : CPosition();
+	}
+
+} // namespace
+
+void CACTag::InvalidateAirportCache()
+{
+	g_airportPositions.clear();
+	g_airportCacheSectorFile.clear();
+	g_airportCacheBuilt = false;
+}
+
 void CACTag::DrawFPACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPlan *fp, unordered_map<string, POINT> *tOffset)
 {
 
@@ -248,17 +319,10 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 	// Line 3 Items
 	string acType = fp->GetFlightPlanData().GetAircraftFPType();
 	string destination = fp->GetFlightPlanData().GetDestination();
-	CPosition dest;
 
-	rad->GetPlugIn()->SelectActiveSectorfile();
-	for (CSectorElement sectorElement = rad->GetPlugIn()->SectorFileElementSelectFirst(SECTOR_ELEMENT_AIRPORT); sectorElement.IsValid();
-		 sectorElement = rad->GetPlugIn()->SectorFileElementSelectNext(sectorElement, SECTOR_ELEMENT_AIRPORT))
-	{
-		if (!strcmp(sectorElement.GetName(), destination.c_str()))
-		{
-			sectorElement.GetPosition(&dest, 0);
-		}
-	}
+	// Zeroed when the airport is not in the sector file, which the branch below detects.
+	CPosition dest = LookupAirportPosition(rad, destination);
+
 	string destinationDist, destinationTime;
 	double distnm;
 	// if the destination airport is not in the sector file, have to use Euroscope's FP calculated distance and not a direct distance

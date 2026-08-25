@@ -22,5 +22,11 @@ public:
     static void CACTag::DrawRTConnector(CDC* dc, CRadarScreen* rad, CRadarTarget* rt, CFlightPlan* fp, COLORREF color, unordered_map<string, POINT>* tOffset);
     static void DrawHistoryDots(CDC* dc, CRadarTarget* rt);
     static void DrawHistoryDots(CDC* dc, CFlightPlan* rt);
+
+    // Drops the cached sector file airport positions used for destination distance,
+    // forcing a rebuild on next use. The cache otherwise refreshes only when the sector
+    // file name changes, so call this when a sector file may have been reloaded under
+    // the same name.
+    static void InvalidateAirportCache();
 };
 

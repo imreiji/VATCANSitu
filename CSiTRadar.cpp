@@ -3218,6 +3218,11 @@ void CSiTRadar::DisplayActiveRunways() {
 void CSiTRadar::OnAsrContentLoaded(bool Loaded) {
 	const char* filt = nullptr;
 
+	// A sector file may have been reloaded under the same name, which the cache's
+	// name-based staleness check cannot see. Rebuilding here costs one scan per ASR load
+	// rather than one per aircraft per frame.
+	CACTag::InvalidateAirportCache();
+
 	// getting altitude filter information
 	if ((filt = GetDataFromAsr("altFilterHigh")) != NULL) {
 		altFilterHigh = atoi(filt);
