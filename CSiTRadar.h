@@ -69,9 +69,17 @@ struct ACData {
     int follower{ 1 }; // 0 is light, 1 is med, 2 heavy, 3 super
 };
 
+// Identifies the focused text field by ID rather than by address.
+//
+// This used to hold an STextField* pointing into a vector owned by a CAppWindows inside
+// the radarScrWindows map. Closing a window destroyed that vector while the pointer was
+// still live, and the keyboard hook kept writing through it until the next OnRefresh
+// recomputed focus - up to a full second later, since EuroScope idles near 1 FPS.
+// Resolve through CSiTRadar::GetFocusedTextField() instead, which validates both IDs.
 struct SFocusItem {
-    bool m_focus_on;
-    STextField* m_focused_tf;
+    bool m_focus_on{ false };
+    int m_window_id{ -1 };
+    unsigned long m_text_field_id{ 0 };
 };
 
 struct SFreeText {
@@ -278,6 +286,19 @@ public:
     inline virtual void OnControllerDisconnect(CController Controller);
     static CAppWindows* GetAppWindow(int winID);
 
+    // Resolves the "<windowId> <function>" screen-object id prefix to an open window.
+    // Returns nullptr when the id is malformed or the window has already been closed.
+    //
+    // Callers previously did GetAppWindow(stoi(id))->... with neither guard: stoi throws
+    // std::invalid_argument on a malformed id, and an exception escaping a EuroScope
+    // callback terminates the process, while a closed window gave a null dereference.
+    // Once this returns non-null, a later stoi(id) on the same id is safe by construction.
+    static CAppWindows* GetAppWindowFromObjectId(const std::string& id) {
+        if (id.empty()) { return nullptr; }
+        try { return GetAppWindow(std::stoi(id)); }
+        catch (...) { return nullptr; }
+    }
+
     static void RegisterButton(RECT rect) {
 
     };
@@ -418,6 +439,32 @@ public:
         fp.GetControllerAssignedData().SetScratchPadString(newstring.c_str());
         fp.GetFlightPlanData().AmendFlightPlan();
         return true;
+    }
+
+    // Resolves the focused text field, or nullptr when nothing is focused or the window
+    // that owned it has since been closed. Clears the focus flag in that case so callers
+    // do not keep retrying. Never cache the result: the next window close invalidates it.
+    static STextField* GetFocusedTextField() {
+        if (!menuState.focusedItem.m_focus_on) { return nullptr; }
+
+        CAppWindows* window = GetAppWindow(menuState.focusedItem.m_window_id);
+        if (window != nullptr) {
+            for (auto& tf : window->m_textfields_) {
+                if (tf.m_textFieldID == menuState.focusedItem.m_text_field_id) {
+                    return &tf;
+                }
+            }
+        }
+
+        // Window or field is gone - the focus record is stale.
+        menuState.focusedItem.m_focus_on = false;
+        return nullptr;
+    }
+
+    static void SetFocusedTextField(int windowId, unsigned long textFieldId) {
+        menuState.focusedItem.m_focus_on = true;
+        menuState.focusedItem.m_window_id = windowId;
+        menuState.focusedItem.m_text_field_id = textFieldId;
     }
 
     void ClearFocusedTextFields() {

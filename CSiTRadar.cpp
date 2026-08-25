@@ -205,8 +205,7 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 		for (auto& win : menuState.radarScrWindows) {
 			for (auto& tf : win.second.m_textfields_) {
 				if(tf.m_focused) {
-					menuState.focusedItem.m_focus_on = true;
-					menuState.focusedItem.m_focused_tf = &tf;
+					SetFocusedTextField(win.first, tf.m_textFieldID);
 				}
 			}
 		}
@@ -1942,7 +1941,8 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 	}
 
 	if (ObjectType == WINDOW_SCROLL_ARROW_UP) {
-		auto window = GetAppWindow(stoi(id));
+		auto window = GetAppWindowFromObjectId(id);
+		if (window == nullptr) { return; }
 		auto lb = window->GetListBox(atoi(func.c_str()));
 		lb.ScrollUp();
 		lb.listBox_.clear();
@@ -1953,7 +1953,8 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 	}
 
 	if (ObjectType == WINDOW_SCROLL_ARROW_DOWN) {
-		auto window = GetAppWindow(stoi(id));
+		auto window = GetAppWindowFromObjectId(id);
+		if (window == nullptr) { return; }
 		auto lb = window->GetListBox(atoi(func.c_str()));
 
 		lb.ScrollDown();
@@ -2002,7 +2003,8 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 
 	if (ObjectType == WINDOW_DIRECT_TO) {
 		string c;
-		auto window = GetAppWindow(stoi(id));
+		auto window = GetAppWindowFromObjectId(id);
+		if (window == nullptr) { return; }
 		string cs = window->m_callsign;
 
 		if (!strcmp(func.c_str(), "Ok")) {
@@ -2102,13 +2104,14 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 
 	if (ObjectType == WINDOW_FREE_TEXT) {
 
-		auto window = GetAppWindow(stoi(id));
+		auto window = GetAppWindowFromObjectId(id);
+		if (window == nullptr) { return; }
 
 		if (!strcmp(func.c_str(), "Submit")) {
 			string c;
 			// if the textbox is selected, else go with the choice in menu
-			if (menuState.focusedItem.m_focus_on) {
-				c = menuState.focusedItem.m_focused_tf->m_text;
+			if (STextField* focused = GetFocusedTextField()) {
+				c = focused->m_text;
 			}
 			CPosition pos;
 			pos = ConvertCoordFromPixelToPosition(menuState.MB3clickedPt);
@@ -2131,7 +2134,8 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 
 	if (ObjectType == WINDOW_CTRL_REMARKS) {
 
-		auto window = GetAppWindow(stoi(id));
+		auto window = GetAppWindowFromObjectId(id);
+		if (window == nullptr) { return; }
 
 		if (!strcmp(func.c_str(), "Blank")) {
 			ModifyCtrlRemarks("", GetPlugIn()->FlightPlanSelect(window->m_callsign.c_str()));
@@ -2146,8 +2150,8 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 		if (!strcmp(func.c_str(), "Submit")) {
 			string c; 
 			// if the textbox is selected, else go with the choice in menu
-			if (menuState.focusedItem.m_focus_on) {
-				c = menuState.focusedItem.m_focused_tf->m_text;
+			if (STextField* focused = GetFocusedTextField()) {
+				c = focused->m_text;
 			}
 			else {
 				for (const auto& lb : window->m_listboxes_) {
@@ -2171,7 +2175,8 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 	}
 
 	if (ObjectType == WINDOW_POINT_OUT) {
-		auto window = GetAppWindow(stoi(id));
+		auto window = GetAppWindowFromObjectId(id);
+		if (window == nullptr) { return; }
 		if (!strcmp(func.c_str(), "Cancel")) {
 			menuState.radarScrWindows.erase(stoi(id));
 		}
@@ -2230,7 +2235,8 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 			win = s.substr(0, pos);
 			le = s.substr(pos + 1);
 		}
-		auto window = GetAppWindow(stoi(win));
+		auto window = GetAppWindowFromObjectId(win);
+		if (window == nullptr) { return; }
 		
 		for (auto &lb : window->m_listboxes_) {
 			for (auto &lelem : lb.listBox_) {
@@ -2280,8 +2286,12 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 				if (window.first == atoi(win.c_str())) {
 					if (textf.m_textFieldID == atoi(tf.c_str())) {
 						textf.m_focused = !textf.m_focused;
-						menuState.focusedItem.m_focus_on = textf.m_focused;
-						menuState.focusedItem.m_focused_tf = &textf;
+						if (textf.m_focused) {
+							SetFocusedTextField(window.first, textf.m_textFieldID);
+						}
+						else {
+							menuState.focusedItem.m_focus_on = false;
+						}
 					}
 					else {
 						textf.m_focused = false;
