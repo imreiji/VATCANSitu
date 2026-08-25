@@ -673,7 +673,7 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		tagOffsetY = pTag.y;
 
 		bool blinking = FALSE;
-		if (fp->GetHandoffTargetControllerId() == rad->GetPlugIn()->ControllerMyself().GetPositionId() && strcmp(fp->GetHandoffTargetControllerId(), "") != 0)
+		if (strcmp(fp->GetHandoffTargetControllerId(), rad->GetPlugIn()->ControllerMyself().GetPositionId()) == 0 && strcmp(fp->GetHandoffTargetControllerId(), "") != 0)
 		{
 			blinking = TRUE;
 		}
@@ -1077,7 +1077,7 @@ void CACTag::DrawNARDSTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightP
 		tagOffsetY = pTag.y;
 
 		bool blinking = FALSE;
-		if (fp->GetHandoffTargetControllerId() == rad->GetPlugIn()->ControllerMyself().GetPositionId() && strcmp(fp->GetHandoffTargetControllerId(), "") != 0)
+		if (strcmp(fp->GetHandoffTargetControllerId(), rad->GetPlugIn()->ControllerMyself().GetPositionId()) == 0 && strcmp(fp->GetHandoffTargetControllerId(), "") != 0)
 		{
 			blinking = TRUE;
 		}

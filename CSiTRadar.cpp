@@ -1120,7 +1120,10 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 				//
 
-				for (auto window : menuState.radarScrWindows) {
+				// by reference: DrawWindow() writes hit-test rects back into the window's
+				// buttons/listboxes/textfields. Iterating by value deep-copied every window
+				// each frame and discarded those writes.
+				for (auto& window : menuState.radarScrWindows) {
 					SWindowElements r = window.second.DrawWindow(&dc);
 					AddScreenObject(WINDOW_TITLE_BAR, to_string(window.second.m_windowId_).c_str(), r.titleBarRect, true, to_string(window.second.m_windowId_).c_str());
 					
@@ -2060,7 +2063,7 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 
 						mAcData[cs].directToLineOn = false;
 						mAcData[cs].directToPendingPosition.m_Latitude = 0.0;
-						mAcData[cs].directToPendingPosition.m_Latitude = 0.0;
+						mAcData[cs].directToPendingPosition.m_Longitude = 0.0;
 						mAcData[cs].directToPendingFixName = "";
 						return;
 					}
@@ -2077,15 +2080,15 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 			menuState.radarScrWindows.erase(stoi(id));
 			mAcData[cs].directToLineOn = false;
 			mAcData[cs].directToPendingPosition.m_Latitude = 0.0;
-			mAcData[cs].directToPendingPosition.m_Latitude = 0.0;
+			mAcData[cs].directToPendingPosition.m_Longitude = 0.0;
 			mAcData[cs].directToPendingFixName = "";
 
 		}
 
 		if (!strcmp(func.c_str(), "Cancel")) {
 			mAcData[window->m_callsign].directToLineOn = false;
-			mAcData[window->m_callsign].directToPendingPosition.m_Latitude = 0.0; 
 			mAcData[window->m_callsign].directToPendingPosition.m_Latitude = 0.0;
+			mAcData[window->m_callsign].directToPendingPosition.m_Longitude = 0.0;
 			mAcData[window->m_callsign].directToPendingFixName = "";
 
 			menuState.radarScrWindows.erase(stoi(id));
