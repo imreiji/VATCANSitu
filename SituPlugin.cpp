@@ -127,62 +127,73 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
     if (CSiTRadar::m_pRadScr == nullptr) { return CallNextHookEx(NULL, nCode, wParam, lParam); }
 
-    if (CSiTRadar::menuState.focusedItem.m_focus_on) {
-        CAppWindows* parentWin = CSiTRadar::GetAppWindow(CSiTRadar::menuState.focusedItem.m_focused_tf->m_parentWindowID);
+    // Resolve the focused field through its window and field IDs rather than following a
+    // stored pointer. Closing a window destroyed the vector the old STextField* pointed
+    // into, and every keystroke below then wrote to freed memory until the next
+    // OnRefresh recomputed focus. GetFocusedTextField returns nullptr for a stale record
+    // and clears the flag; GetAppWindow can likewise return nullptr and was never checked.
+    CAppWindows* parentWin = CSiTRadar::GetAppWindow(CSiTRadar::menuState.focusedItem.m_window_id);
+    STextField* focusedField = CSiTRadar::GetFocusedTextField();
+
+    if (parentWin != nullptr && focusedField != nullptr) {
         if (!(lParam & 0x40000000)) {
             if (wParam >= 0x30 && wParam <= 0x5A) {
                 char l = MapVirtualKeyA(wParam, 2);
 
-                CSiTRadar::menuState.focusedItem.m_focused_tf->m_text.push_back(l);
+                focusedField->m_text.push_back(l);
                 CSiTRadar::m_pRadScr->RequestRefresh();
                 return -1;
             }
             if (wParam == VK_OEM_PERIOD) {
-                CSiTRadar::menuState.focusedItem.m_focused_tf->m_text.push_back('.');
+                focusedField->m_text.push_back('.');
                 CSiTRadar::m_pRadScr->RequestRefresh();
                 return -1;
             }
             if (wParam == VK_OEM_PLUS) {
-                CSiTRadar::menuState.focusedItem.m_focused_tf->m_text.push_back('+');
+                focusedField->m_text.push_back('+');
                 CSiTRadar::m_pRadScr->RequestRefresh();
                 return -1;
             }
             if (wParam == VK_OEM_MINUS) {
-                CSiTRadar::menuState.focusedItem.m_focused_tf->m_text.push_back('-');
+                focusedField->m_text.push_back('-');
                 CSiTRadar::m_pRadScr->RequestRefresh();
                 return -1;
             }
             if (wParam == VK_OEM_2) {
-                CSiTRadar::menuState.focusedItem.m_focused_tf->m_text.push_back('/');
+                focusedField->m_text.push_back('/');
                 CSiTRadar::m_pRadScr->RequestRefresh();
                 return -1;
             }
             if (wParam == VK_SPACE) {
-                CSiTRadar::menuState.focusedItem.m_focused_tf->m_text.push_back(' ');
+                focusedField->m_text.push_back(' ');
                 CSiTRadar::m_pRadScr->RequestRefresh();
                 return -1;
             }
             if (wParam == VK_BACK) {
-                if (!CSiTRadar::menuState.focusedItem.m_focused_tf->m_text.empty()) {
-                    CSiTRadar::menuState.focusedItem.m_focused_tf->m_text.pop_back();
+                if (!focusedField->m_text.empty()) {
+                    focusedField->m_text.pop_back();
                     CSiTRadar::m_pRadScr->RequestRefresh();
                 }
                 return -1;
             }
             if (wParam == VK_RETURN) {
                 if (parentWin->m_winType == WINDOW_HANDOFF_EXT_CJS) {
-              
+
                     CSiTRadar::m_pRadScr->GetPlugIn()->FlightPlanSelect(parentWin->m_callsign.c_str()).InitiateHandoff(
-                        CSiTRadar::m_pRadScr->GetPlugIn()->ControllerSelectByPositionId(CSiTRadar::menuState.focusedItem.m_focused_tf->m_text.c_str()).GetCallsign()
+                        CSiTRadar::m_pRadScr->GetPlugIn()->ControllerSelectByPositionId(focusedField->m_text.c_str()).GetCallsign()
                     );
+                    // Closing the window destroys parentWin and focusedField - nothing
+                    // below may touch them.
                     CSiTRadar::CloseWindow(parentWin->m_windowId_);
+                    CSiTRadar::menuState.focusedItem.m_focus_on = false;
                     CSiTRadar::m_pRadScr->RequestRefresh();
                     return -1;
                 }
                 if (parentWin->m_winType == WINDOW_CTRL_REMARKS) {
 
-                    CSiTRadar::ModifyCtrlRemarks(CSiTRadar::menuState.focusedItem.m_focused_tf->m_text.c_str(), CSiTRadar::m_pRadScr->GetPlugIn()->FlightPlanSelect(parentWin->m_callsign.c_str()));
+                    CSiTRadar::ModifyCtrlRemarks(focusedField->m_text.c_str(), CSiTRadar::m_pRadScr->GetPlugIn()->FlightPlanSelect(parentWin->m_callsign.c_str()));
                     CSiTRadar::CloseWindow(parentWin->m_windowId_);
+                    CSiTRadar::menuState.focusedItem.m_focus_on = false;
                     CSiTRadar::m_pRadScr->RequestRefresh();
                     return -1;
                 }
