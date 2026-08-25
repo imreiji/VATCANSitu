@@ -490,17 +490,19 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 			dc->SetTextColor(C_PPS_YELLOW);
 		}
 
-		if (sfi.size() > 1 && sfi.find(" ", 2) != sfi.npos && sfi.find(" ", 2) < 3 && sfi.at(0) == ' ')
+		// Shares the parser with ModifySFI rather than re-deriving the layout here. The
+		// size()/find() chain this replaced drew scratchpad[1] as the SFI for any one or
+		// two character scratchpad, so a two character remark such as "AB" was rendered
+		// as an SFI of "B".
+		const Scratchpad sfiFields = ParseScratchpad(sfi);
+
+		if (sfiFields.sfi != '\0')
 		{
-			dc->DrawText(sfi.substr(1, 1).c_str(), &rline1, DT_LEFT | DT_CALCRECT);
-			dc->DrawText(sfi.substr(1, 1).c_str(), &rline1, DT_LEFT);
+			const string sfiText(1, sfiFields.sfi);
+			dc->DrawText(sfiText.c_str(), &rline1, DT_LEFT | DT_CALCRECT);
+			dc->DrawText(sfiText.c_str(), &rline1, DT_LEFT);
 		}
-		else if (sfi.size() < 3 && sfi.size() != 0)
-		{
-			dc->DrawText(sfi.substr(1, 1).c_str(), &rline1, DT_LEFT | DT_CALCRECT);
-			dc->DrawText(sfi.substr(1, 1).c_str(), &rline1, DT_LEFT);
-		}
-		else if (sfi.size() == 0)
+		else
 		{
 			// just draw a blank space character if no SFI; this leavs a clickspot
 			dc->DrawText(" ", &rline1, DT_LEFT | DT_CALCRECT);
@@ -706,19 +708,13 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		RECT rline4;
 		rline4.top = line4.y;
 		rline4.left = line4.x;
-		if (sfi.size() > 2)
+		// Same parser again instead of stripping the " X " prefix by hand. The old guard
+		// was on the length of the whole scratchpad, so remarks of one or two characters
+		// were never drawn at all.
+		if (!sfiFields.remarks.empty())
 		{
-			if (sfi.find(" ") != sfi.npos && sfi.find(" ") == 0)
-			{
-				sfi = sfi.substr(sfi.find(" ") + 1);
-				// Find the second space: " N REMARKS" -> "REMARKS"
-				if (sfi.find(" ") != sfi.npos && sfi.find(" ") == 1)
-				{ // allows for spaces in remarks i.e. "NEW PILOT"
-					sfi = sfi.substr(sfi.find(" ") + 1);
-				}
-			}
-			dc->DrawText(sfi.c_str(), &rline4, DT_LEFT | DT_CALCRECT);
-			dc->DrawText(sfi.c_str(), &rline4, DT_LEFT);
+			dc->DrawText(sfiFields.remarks.c_str(), &rline4, DT_LEFT | DT_CALCRECT);
+			dc->DrawText(sfiFields.remarks.c_str(), &rline4, DT_LEFT);
 			rad->AddScreenObject(CTR_DATA_TYPE_SCRATCH_PAD_STRING, rt->GetCallsign(), rline4, TRUE, rt->GetCallsign());
 		}
 	}

@@ -12,6 +12,7 @@
 #include <gdiplus.h>
 #include <deque>
 #include "constants.h"
+#include "Scratchpad.h"
 #include "wxRadar.h"
 #include "CAsyncResponse.h"
 #include <future>
@@ -390,55 +391,26 @@ public:
         RECT Area,
         int Button);
 
+    // Sets, replaces or clears the SFI, leaving the controller remarks alone.
+    //
+    // The size()/at() chain this replaced had no branch for a two character scratchpad
+    // whose first character was not a space, so newstring stayed empty and was written
+    // back regardless - silently wiping the remarks. Clearing the SFI of a one character
+    // remark dropped it for the same reason. See tests/ScratchpadTests.cpp, which runs
+    // both implementations over a corpus and shows the only other differences are the
+    // old code's trailing space.
     static bool ModifySFI(string c, CFlightPlan fp) {
-        string scratchpad;
-        string newstring;
-        scratchpad = fp.GetControllerAssignedData().GetScratchPadString();
-        
         if (!strcmp(c.c_str(), "EXP")) {
             CSiTRadar::menuState.ExpandSFIOptions();
             return false;
         }
-        else if (!strcmp(c.c_str(), "CLR")) {
-            if (scratchpad.size() == 1) {
-                newstring = "";
-            }
-            else if (scratchpad.size() == 2 && scratchpad.at(0) == ' ') {
-                newstring = "";
-            }
-            else if (scratchpad.size() > 2) {
-                if (scratchpad.at(0) == ' ' && scratchpad.at(2) == ' ') {
-                    newstring = scratchpad.substr(3);
-                }
-                else {
-                    newstring = scratchpad;
-                }
 
-            }
+        const string scratchpad = fp.GetControllerAssignedData().GetScratchPadString();
 
-        }
-        else {
-            if (!scratchpad.empty()) {
-                if (scratchpad.size() == 1) {
-                    newstring = " " + c + " " + scratchpad;
-                }
-                else if (scratchpad.size() == 2 && scratchpad.at(0) == ' ') {
-                    newstring = scratchpad.replace(1, 1, c);
-                }
-                else if (scratchpad.size() > 2) {
-                    if (scratchpad.at(0) == ' ' && scratchpad.at(2) == ' ') {
-                        newstring = scratchpad.replace(1, 1, c);
-                    }
-                    else {
-                        newstring = " " + c + " " + scratchpad;
-                    }
+        const string newstring = !strcmp(c.c_str(), "CLR")
+            ? ScratchpadWithoutSfi(scratchpad)
+            : ScratchpadWithSfi(scratchpad, c.empty() ? '\0' : c.at(0));
 
-                }
-            }
-            else {
-                newstring = " " + c;
-            }
-        }
         fp.GetControllerAssignedData().SetScratchPadString(newstring.c_str());
         fp.GetFlightPlanData().AmendFlightPlan();
         return true;
@@ -491,31 +463,12 @@ public:
 
     }
 
+    // Replaces the controller remarks, keeping any SFI. Had the same missing branch as
+    // ModifySFI: a two character scratchpad not starting with a space produced an empty
+    // string, so editing the remarks of such an aircraft blanked the field instead.
     static bool ModifyCtrlRemarks(string c, CFlightPlan fp) {
-        string scratchpad;
-        string newstring;
-        scratchpad = fp.GetControllerAssignedData().GetScratchPadString();
-
-        if (!scratchpad.empty()) {
-            if (scratchpad.size() == 1) {
-                newstring = c;
-            }
-            else if (scratchpad.size() == 2 && scratchpad.at(0) == ' ') {
-                newstring = scratchpad + " " + c;
-            }
-            else if (scratchpad.size() > 2) {
-                if (scratchpad.at(0) == ' ' && scratchpad.at(2) == ' ') {
-                    newstring = scratchpad.substr(0, 3) + c;
-                }
-                else {
-                    newstring = c;
-                }
-
-            }
-        }
-        else {
-            newstring = c;
-        }
+        const string scratchpad = fp.GetControllerAssignedData().GetScratchPadString();
+        const string newstring = ScratchpadWithRemarks(scratchpad, c);
 
         fp.GetControllerAssignedData().SetScratchPadString(newstring.c_str());
         fp.GetFlightPlanData().AmendFlightPlan();
