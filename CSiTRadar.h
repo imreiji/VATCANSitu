@@ -24,7 +24,6 @@
 #include "TopMenu.h"
 #include "ACTag.h"
 #include "PPS.h"
-#include "CACList.h"
 
 using namespace EuroScopePlugIn;
 using namespace std;
@@ -176,7 +175,6 @@ struct buttonStates {
     void ExpandSFIOptions() { SFIPrefString = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"; };
 
     map<int, CAppWindows> radarScrWindows;
-    map<int, CACList> radarScrLists;
     vector<SSquawkCodeManagement> squawkCodes;
 
     // mAcData garbage cleaning
@@ -186,71 +184,6 @@ struct buttonStates {
 
 
 };
-
-class CAircraftList {
-
-public:
-    POINT m_p{ 0,0 };
-    bool m_collapsed = false; 
-    int m_listType{};
-    int listType{};
-    CRadarScreen* radscr;
-    unordered_map<string, ACData>* acData{};
-    unordered_map<int, ACList> acLists;
-    CDC* dc;
-
-    CAircraftList() 
-        : m_p({ 0,0 }) 
-    {}
-
-    void Draw() 
-    {
-        int sDC = dc->SaveDC();
-
-        dc->SetTextColor(C_WHITE);
-        dc->SelectObject(CFontHelper::Euroscope14);
-        string header;
-
-        // Draw the heading
-        RECT listHeading{};
-        listHeading.left = m_p.x;
-        listHeading.top = m_p.y;
-
-        // Draw the arrow
-        HPEN targetPen = CreatePen(PS_SOLID, 1, C_WHITE);;
-        HBRUSH targetBrush = CreateSolidBrush(C_WHITE);
-
-        dc->SelectObject(targetPen);
-        dc->SelectObject(targetBrush);
-
-        bool collapsed{ false };
-        bool showArrow = false;
-
-        dc->RestoreDC(sDC);
-        DeleteObject(targetPen);
-        DeleteObject(targetBrush);
-    }
-    void Move(int x, int y)
-    {
-        m_p.x = x;
-        m_p.y = y;
-    }
-    void Collapse()
-    {
-        m_collapsed = true;
-    }
-
-    void Expand() 
-    {
-        m_collapsed = false;
-    }
-    
-    int GetListType() 
-    {
-        return m_listType;
-    }
-};
-
 
 class CSiTRadar :
     public EuroScopePlugIn::CRadarScreen

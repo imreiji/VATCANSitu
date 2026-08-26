@@ -51,9 +51,6 @@
     <ClCompile Include="CAppWindows.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="CACList.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="CFontHelper.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -119,9 +116,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CAppWindows.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="CACList.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CFontHelper.h">
