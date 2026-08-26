@@ -144,19 +144,31 @@ CSiTRadar::CSiTRadar()
 			wxRadar::wxLatCtr = j["wxlat"];
 			wxRadar::wxLongCtr = j["wxlong"];
 
-			acLists[LIST_TIME_ATIS].p.x = j["atisList"]["x"];
-			acLists[LIST_TIME_ATIS].p.y = j["atisList"]["y"];
+			// List positions are offsets from the top left of the radar area. A file
+			// written before that change stores absolute screen coordinates under the
+			// old key names, so read those instead and convert on the first draw, when
+			// the radar area is known. Reading an old absolute value as an offset would
+			// move every list by the radar area origin.
+			//
+			// Each list is guarded on its own: a settings file predating any one of them
+			// has no such key, and an unguarded read throws and abandons every setting
+			// below it - which is how the message list key broke this block before.
+			const auto readListPosition = [&j](ACList& list, const char* offsetKey, const char* absoluteKey) {
+				if (!j[offsetKey].is_null()) {
+					list.offset.x = j[offsetKey]["x"];
+					list.offset.y = j[offsetKey]["y"];
+					list.offsetIsAbsolute = false;
+				}
+				else if (!j[absoluteKey].is_null()) {
+					list.offset.x = j[absoluteKey]["x"];
+					list.offset.y = j[absoluteKey]["y"];
+					list.offsetIsAbsolute = true;
+				}
+			};
 
-			acLists[LIST_OFF_SCREEN].p.x = j["offScreenList"]["x"];
-			acLists[LIST_OFF_SCREEN].p.y = j["offScreenList"]["y"];
-
-			// Guarded: a settings.json written before the message list existed has no such
-			// key, and reading it unguarded throws, which would abandon the rest of this
-			// block and silently drop every setting below it.
-			if (!j["messageList"].is_null()) {
-				acLists[LIST_MESSAGES].p.x = j["messageList"]["x"];
-				acLists[LIST_MESSAGES].p.y = j["messageList"]["y"];
-			}
+			readListPosition(acLists[LIST_TIME_ATIS], "atisListOffset", "atisList");
+			readListPosition(acLists[LIST_OFF_SCREEN], "offScreenListOffset", "offScreenList");
+			readListPosition(acLists[LIST_MESSAGES], "messageListOffset", "messageList");
 
 			menuState.numHistoryDots = j["menuState"]["numHistoryDots"];
 			menuState.bigACID = j["menuState"]["bigACID"];
@@ -195,14 +207,16 @@ CSiTRadar::CSiTRadar()
 			j["wxlat"] = wxRadar::wxLatCtr;
 			j["wxlong"] = wxRadar::wxLongCtr;
 
-			j["atisList"]["x"] = acLists[LIST_TIME_ATIS].p.x;
-			j["atisList"]["y"] = acLists[LIST_TIME_ATIS].p.y;
+			// Written under new key names so an older build reading this file falls back
+			// to its own defaults rather than treating an offset as a screen position.
+			j["atisListOffset"]["x"] = acLists[LIST_TIME_ATIS].offset.x;
+			j["atisListOffset"]["y"] = acLists[LIST_TIME_ATIS].offset.y;
 
-			j["offScreenList"]["x"] = acLists[LIST_OFF_SCREEN].p.x;
-			j["offScreenList"]["y"] = acLists[LIST_OFF_SCREEN].p.y;
+			j["offScreenListOffset"]["x"] = acLists[LIST_OFF_SCREEN].offset.x;
+			j["offScreenListOffset"]["y"] = acLists[LIST_OFF_SCREEN].offset.y;
 
-			j["messageList"]["x"] = acLists[LIST_MESSAGES].p.x;
-			j["messageList"]["y"] = acLists[LIST_MESSAGES].p.y;
+			j["messageListOffset"]["x"] = acLists[LIST_MESSAGES].offset.x;
+			j["messageListOffset"]["y"] = acLists[LIST_MESSAGES].offset.y;
 
 			j["hoppieCode"] = CPDLCMessage::hoppieCode;
 			j["hoppieICAO"] = CPDLCMessage::hoppieICAO;
@@ -278,14 +292,16 @@ CSiTRadar::~CSiTRadar()
 			j["wxlat"] = wxRadar::wxLatCtr;
 			j["wxlong"] = wxRadar::wxLongCtr;
 
-			j["atisList"]["x"] = acLists[LIST_TIME_ATIS].p.x;
-			j["atisList"]["y"] = acLists[LIST_TIME_ATIS].p.y;
+			// Written under new key names so an older build reading this file falls back
+			// to its own defaults rather than treating an offset as a screen position.
+			j["atisListOffset"]["x"] = acLists[LIST_TIME_ATIS].offset.x;
+			j["atisListOffset"]["y"] = acLists[LIST_TIME_ATIS].offset.y;
 
-			j["offScreenList"]["x"] = acLists[LIST_OFF_SCREEN].p.x;
-			j["offScreenList"]["y"] = acLists[LIST_OFF_SCREEN].p.y;
+			j["offScreenListOffset"]["x"] = acLists[LIST_OFF_SCREEN].offset.x;
+			j["offScreenListOffset"]["y"] = acLists[LIST_OFF_SCREEN].offset.y;
 
-			j["messageList"]["x"] = acLists[LIST_MESSAGES].p.x;
-			j["messageList"]["y"] = acLists[LIST_MESSAGES].p.y;
+			j["messageListOffset"]["x"] = acLists[LIST_MESSAGES].offset.x;
+			j["messageListOffset"]["y"] = acLists[LIST_MESSAGES].offset.y;
 
 			j["hoppieCode"] = CPDLCMessage::hoppieCode;
 			j["hoppieICAO"] = CPDLCMessage::hoppieICAO;
@@ -557,9 +573,13 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 					SituPlugin::prevMouseDelta = 0; // sync refrehes
 				}
 
-				DrawACList(acLists[LIST_TIME_ATIS].p, &dc, mAcData, LIST_TIME_ATIS);
-				DrawACList(acLists[LIST_OFF_SCREEN].p, &dc, mAcData, LIST_OFF_SCREEN);
-				DrawACList(acLists[LIST_MESSAGES].p, &dc, mAcData, LIST_MESSAGES);
+				// Convert any position carried over from an older settings file, and keep
+				// every list reachable if the radar area has shrunk since it was placed.
+				ResolveListOffsets(radarea);
+
+				DrawACList(ListOrigin(acLists[LIST_TIME_ATIS], radarea), &dc, mAcData, LIST_TIME_ATIS);
+				DrawACList(ListOrigin(acLists[LIST_OFF_SCREEN], radarea), &dc, mAcData, LIST_OFF_SCREEN);
+				DrawACList(ListOrigin(acLists[LIST_MESSAGES], radarea), &dc, mAcData, LIST_MESSAGES);
 
 				
 
@@ -3283,14 +3303,15 @@ void CSiTRadar::OnMoveScreenObject(int ObjectType, const char* sObjectId, POINT 
 			RequestRefresh();
 		}
 		
-		if (ObjectType == LIST_TIME_ATIS) {
-			acLists[LIST_TIME_ATIS].p = { Pt.x - ((Area.right - Area.left) / 2), Pt.y - ((Area.bottom - Area.top) / 2) };
-		}
-		if (ObjectType == LIST_OFF_SCREEN) {
-			acLists[LIST_OFF_SCREEN].p = { Pt.x - ((Area.right - Area.left) / 2), Pt.y - ((Area.bottom - Area.top) / 2) };
-		}
-		if (ObjectType == LIST_MESSAGES) {
-			acLists[LIST_MESSAGES].p = { Pt.x - ((Area.right - Area.left) / 2), Pt.y - ((Area.bottom - Area.top) / 2) };
+		// The drag gives an absolute screen point; what is stored is its offset from the
+		// radar area origin, so the list keeps its place relative to the header strip.
+		if (ObjectType == LIST_TIME_ATIS || ObjectType == LIST_OFF_SCREEN || ObjectType == LIST_MESSAGES) {
+			const RECT listArea = GetRadarArea();
+			ACList& list = acLists[ObjectType];
+			list.offset = { Pt.x - ((Area.right - Area.left) / 2) - listArea.left,
+			                Pt.y - ((Area.bottom - Area.top) / 2) - listArea.top };
+			list.offsetIsAbsolute = false;
+			ClampListOffset(list, listArea);
 		}
 
 		if (ObjectType == WINDOW_TITLE_BAR) {
@@ -3683,6 +3704,52 @@ void CSiTRadar::OnFlightPlanDisconnect(CFlightPlan FlightPlan) {
 	rtagOffset.erase(callSign);
 	fptagOffset.erase(callSign);
 	connectorOrigin.erase(callSign);
+}
+
+// Where a list is drawn: its stored offset applied to the radar area origin, which is the
+// same anchor the header strip uses (CPoint(radarea.left, radarea.top)). Move or resize the
+// radar area and the lists travel with the header rather than staying put in screen space.
+POINT CSiTRadar::ListOrigin(const ACList& list, const RECT& radarea)
+{
+	return { radarea.left + list.offset.x, radarea.top + list.offset.y };
+}
+
+// Keeps enough of a list inside the radar area to grab hold of. Without this a position
+// saved on a wide monitor leaves the list off the edge of a narrower one, unreachable
+// except by editing settings.json.
+void CSiTRadar::ClampListOffset(ACList& list, const RECT& radarea)
+{
+	const int width = radarea.right - radarea.left;
+	const int height = radarea.bottom - radarea.top;
+
+	// Nothing sensible to clamp against before the screen has a size.
+	if (width <= 0 || height <= 0) { return; }
+
+	// The header strip occupies the top 60 pixels, so a list cannot be dropped underneath it.
+	const int minY = 60;
+	const int maxX = width - LIST_MIN_VISIBLE_WIDTH;
+	const int maxY = height - LIST_MIN_VISIBLE_HEIGHT;
+
+	if (list.offset.x < 0) { list.offset.x = 0; }
+	if (list.offset.y < minY) { list.offset.y = minY; }
+	if (maxX > 0 && list.offset.x > maxX) { list.offset.x = maxX; }
+	if (maxY > minY && list.offset.y > maxY) { list.offset.y = maxY; }
+}
+
+// Converts positions read from a settings file that predates anchored offsets, then clamps
+// every list. The conversion subtracts the radar area origin the value was implicitly
+// measured against, so a list stays where its owner last put it.
+void CSiTRadar::ResolveListOffsets(const RECT& radarea)
+{
+	for (auto& entry : acLists) {
+		ACList& list = entry.second;
+		if (list.offsetIsAbsolute) {
+			list.offset.x -= radarea.left;
+			list.offset.y -= radarea.top;
+			list.offsetIsAbsolute = false;
+		}
+		ClampListOffset(list, radarea);
+	}
 }
 
 void CSiTRadar::DrawACList(POINT p, CDC* dc, unordered_map<string, ACData>& ac, int listType)
