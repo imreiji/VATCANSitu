@@ -1,6 +1,7 @@
 #pragma once
 
-#include "curl/curl.h"
+#include "HttpClient.h"
+#include "UrlEncode.h"
 #include <EuroScopePlugIn.h>
 #include <string>
 #include <sstream>
@@ -19,7 +20,7 @@ private:
 public:
 	static std::string hoppieCode;  // Hoppie Logon Code
 	static std::string hoppieICAO;
-	static u_int CPDLCMessage::ids;
+	static unsigned int CPDLCMessage::ids;
 	static bool firstPeek; //
 
 
@@ -46,7 +47,7 @@ public:
 	std::string responseRequired{ "" };
 	std::string rawMessageContent{ "" };
 
-	u_int ARINCmessageType; // standardized ARINC message type for CPDLC
+	unsigned int ARINCmessageType; // standardized ARINC message type for CPDLC
 
 	CPDLCMessage();
 	~CPDLCMessage();

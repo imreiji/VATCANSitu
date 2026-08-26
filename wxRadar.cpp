@@ -88,44 +88,38 @@ void wxRadar::parseRadarPNG(CRadarScreen* rad) {
 
     if (CreateDirectoryA(situWxDir.c_str(), NULL)) {}
 
-    CURL* pngDL = curl_easy_init();
-    FILE* dlPNG;
-    errno_t err;
     // ts is now "<host><path>" from weather-maps.json, so it already carries the scheme,
     // host and /v2/radar/<frame> portion that used to be hardcoded here.
     string tileCacheurl = wxRadar::ts + "/256/4/" + wxRadar::wxLatCtr + "/" + wxRadar::wxLongCtr + "/0/0_0.png";
 
-    const char* filename = situWxPng.c_str();
-    curl_easy_setopt(pngDL, CURLOPT_URL, tileCacheurl.c_str());
-    curl_easy_setopt(pngDL, CURLOPT_WRITEFUNCTION, write_file);
+    const SituHttp::Response tile = SituHttp::Get(tileCacheurl, 10000);
 
-    err = fopen_s(&dlPNG, filename, "wb");
-    if (err == 0) {
-
-        /* write the page body to this file handle */
-        curl_easy_setopt(pngDL, CURLOPT_WRITEDATA, dlPNG);
-
-        /* get it! */
-        curl_easy_perform(pngDL);
-
-        if (dlPNG != NULL) {
-            fclose(dlPNG);
-        }
-    }
-    else {
-        // Was a bare return, which skipped the cleanup below and leaked the handle.
-        curl_easy_cleanup(pngDL);
+    // A failed fetch used to leave the file truncated to nothing by the "wb" open and
+    // then report a parse error against the empty file. Say what actually happened
+    // instead, and leave the previous tile on disk.
+    if (!tile.ok) {
+        rad->GetPlugIn()->DisplayUserMessage("VATCAN Situ", "WX Parser",
+            ("Radar tile download failed - " + tile.error).c_str(),
+            true, false, false, false, false);
         return;
     }
 
-    /* cleanup curl stuff */
-    curl_easy_cleanup(pngDL);
+    // Kept on disk as the visible artifact it has always been, but the decode reads the
+    // bytes we already hold rather than writing them out and reading them back.
+    FILE* dlPNG = NULL;
+    if (fopen_s(&dlPNG, situWxPng.c_str(), "wb") == 0 && dlPNG != NULL) {
+        if (!tile.body.empty()) {
+            fwrite(tile.body.data(), 1, tile.body.size(), dlPNG);
+        }
+        fclose(dlPNG);
+    }
 
-
-    std::vector<unsigned char> buffer, image;
-    loadPNG(buffer, filename);
+    std::vector<unsigned char> image;
+    const unsigned char* tileBytes = tile.body.empty()
+        ? 0
+        : reinterpret_cast<const unsigned char*>(tile.body.data());
     unsigned long w, h;
-    int error = wxRadar::decodePNG(image, w, h, buffer.empty() ? 0 : &buffer[0], (unsigned long)buffer.size());
+    int error = wxRadar::decodePNG(image, w, h, tileBytes, (unsigned long)tile.body.size());
 
     // The loop below indexes `image` as a fixed 256x256 RGBA buffer. decodePNG reports the
     // actual dimensions, so validate them: a tile that is not exactly 256x256 (server change,
@@ -261,24 +255,17 @@ int wxRadar::renderRadar(Graphics* g, CRadarScreen* rad, bool showAllPrecip) {
 
 void wxRadar::parseVatsimMetar(int i) {
     
-    CURL* metarCurlHandle = curl_easy_init();
-    string metarString;
     CAsyncResponse response;
 
-    if (metarCurlHandle) {
-        curl_easy_setopt(metarCurlHandle, CURLOPT_URL, "https://metar.vatsim.net/metar.php?id=c");
-        curl_easy_setopt(metarCurlHandle, CURLOPT_WRITEFUNCTION, write_data);
-        curl_easy_setopt(metarCurlHandle, CURLOPT_WRITEDATA, &metarString);
-        curl_easy_setopt(metarCurlHandle, CURLOPT_TIMEOUT_MS, 2500L);
-        CURLcode res;
-        res = curl_easy_perform(metarCurlHandle);
-        if (res == CURLE_OPERATION_TIMEDOUT) {
-            response.reponseMessage = "METAR Fetch Timed Out";
-            response.responseCode = 1;
-            wxRadar::PushAsyncMessage(response);
-        }
-        curl_easy_cleanup(metarCurlHandle);
+    const SituHttp::Response metar = SituHttp::Get("https://metar.vatsim.net/metar.php?id=c", 2500);
+    if (!metar.ok) {
+        // Previously only a timeout was reported, so a 500 or a dropped connection went
+        // by in silence and the parse below ran on an empty string.
+        response.reponseMessage = "METAR fetch failed - " + metar.error;
+        response.responseCode = 1;
+        wxRadar::PushAsyncMessage(response);
     }
+    const string metarString = metar.body;
 
     altimeterMutex.lock();
 
@@ -310,64 +297,50 @@ void wxRadar::parseVatsimMetar(int i) {
 }
 
 void wxRadar::parseVatsimATIS(int i) {
-    CURL* vatsimURL = curl_easy_init();
-    CURL* atisVatsimStatusJson = curl_easy_init();
-    string strVatsimURL;
-    string jsAtis;
     CAsyncResponse result;
 
-    if (vatsimURL) {
-        curl_easy_setopt(vatsimURL, CURLOPT_URL, "https://status.vatsim.net/status.json");
-        curl_easy_setopt(vatsimURL, CURLOPT_WRITEFUNCTION, write_data);
-        curl_easy_setopt(vatsimURL, CURLOPT_WRITEDATA, &strVatsimURL);
-        curl_easy_setopt(vatsimURL, CURLOPT_TIMEOUT_MS, 1500L);
-        CURLcode res;
-        res = curl_easy_perform(vatsimURL);
-        if (res == CURLE_OPERATION_TIMEDOUT) {
-            result.reponseMessage = "VATSIM Datafeed URL Fetch Timed Out";
-            result.responseCode = 1;
-            //asyncMessages.insert(result);
-            // Both handles are still open on this path; the bare return leaked them.
-            curl_easy_cleanup(vatsimURL);
-            curl_easy_cleanup(atisVatsimStatusJson);
-            return;
-        }
-        curl_easy_cleanup(vatsimURL);
+    const SituHttp::Response status = SituHttp::Get("https://status.vatsim.net/status.json", 1500);
+    if (!status.ok) {
+        result.reponseMessage = "VATSIM datafeed URL fetch failed - " + status.error;
+        result.responseCode = 1;
+        // This message was built and then never pushed, so the failure was silent.
+        PushAsyncMessage(result);
+        return;
     }
 
     string dataURL;
 
     try {
-        json jsVatsimURL = json::parse(strVatsimURL);
+        json jsVatsimURL = json::parse(status.body);
         dataURL = jsVatsimURL["data"]["v3"][0];
     }
     catch (exception& e) { string error = e.what(); }
 
-    if (atisVatsimStatusJson) {
-        curl_easy_setopt(atisVatsimStatusJson, CURLOPT_URL, dataURL.c_str());
-        curl_easy_setopt(atisVatsimStatusJson, CURLOPT_WRITEFUNCTION, write_data);
-        curl_easy_setopt(atisVatsimStatusJson, CURLOPT_WRITEDATA, &jsAtis);
-        curl_easy_setopt(atisVatsimStatusJson, CURLOPT_TIMEOUT_MS, 1500L);
-        CURLcode res;
-        res = curl_easy_perform(atisVatsimStatusJson);
-        if (res == CURLE_OPERATION_TIMEDOUT) {
-            result.reponseMessage = "VATSIM Datafeed Timed Out - ATIS letter may be incorrect";
-            result.responseCode = 1;
-            PushAsyncMessage(result);
-            // vatsimURL was already cleaned above; this handle was not.
-            curl_easy_cleanup(atisVatsimStatusJson);
-            return;
-        }
-        else {
-            // Clear under the lock. This ran outside any lock while the main thread could
-            // be reading the same map under a shared_lock in DrawACList, which made the
-            // locking below pointless: the writer was mutating it unsynchronised.
-            std::unique_lock<shared_mutex> clearLock(atisLetterMutex);
-            arptAtisLetter.clear();
-        }
-        curl_easy_cleanup(atisVatsimStatusJson);
+    if (dataURL.empty()) {
+        result.reponseMessage = "VATSIM datafeed URL missing from status.json";
+        result.responseCode = 1;
+        PushAsyncMessage(result);
+        return;
     }
-    else { return; }
+
+    const SituHttp::Response atis = SituHttp::Get(dataURL, 1500);
+    if (!atis.ok) {
+        result.reponseMessage = "VATSIM datafeed failed - ATIS letter may be incorrect ("
+            + atis.error + ")";
+        result.responseCode = 1;
+        PushAsyncMessage(result);
+        return;
+    }
+
+    const string jsAtis = atis.body;
+
+    {
+        // Clear under the lock. This ran outside any lock while the main thread could
+        // be reading the same map under a shared_lock in DrawACList, which made the
+        // locking below pointless: the writer was mutating it unsynchronised.
+        std::unique_lock<shared_mutex> clearLock(atisLetterMutex);
+        arptAtisLetter.clear();
+    }
 
 
     try {

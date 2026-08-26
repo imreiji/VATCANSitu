@@ -1,12 +1,7 @@
 #include "pch.h"
 #include "cpdlc.h"
 
-static std::size_t write_data(void* buffer, std::size_t size, std::size_t nmemb, void* userp) {
-	((std::string*)userp)->append((char*)buffer, size * nmemb);
-	return size * nmemb;
-};
-
-u_int CPDLCMessage::ids = 0;
+unsigned int CPDLCMessage::ids = 0;
 std::string CPDLCMessage::hoppieCode = "";
 std::string CPDLCMessage::hoppieICAO = "";
 bool CPDLCMessage::firstPeek = true;
@@ -207,34 +202,14 @@ CPDLCMessage CPDLCMessage::parseDLMessage(std::string& rawMessage) { // breaks u
 
 // Percent-encodes a value for use in a query string or POST body.
 //
-// Replaces a hand written loop that substituted "%20" for spaces and passed every other
-// character through, on the telex path only - the CPDLC path appended the message
-// completely raw. Any '&' or '=' in message text was therefore read as a field separator
-// by the receiving parser, and the fields it would be inserted among include logon.
-static std::string UrlEncode(CURL* handle, const std::string& value) {
-	if (handle == nullptr) { return value; }
-
-	char* escaped = curl_easy_escape(handle, value.c_str(), static_cast<int>(value.length()));
-	if (escaped == nullptr) { return value; }
-
-	std::string result(escaped);
-	curl_free(escaped);
-	return result;
-}
-
 std::string CPDLCMessage::PollCPDLCMessages() { // Returns raw string of CPDLC messages; Should be called every 50-70s to get new messages
-	std::string rawHoppiePollString;
-
-	auto pollCurl = curl_easy_init();
-	if (pollCurl == nullptr) { return "Error: could not initialise CURL for Hoppie poll"; }
-
 	// https, not http. The logon code is a per-user credential and was previously sent in
 	// clear text, as a URL query parameter, every sixty seconds for the whole session -
 	// readable by anything on the network path and recorded by any intermediary that logs
 	// request lines. The endpoint serves https with a valid certificate.
 	std::string url;
-	url = "https://www.hoppie.nl/acars/system/connect.html?logon=" + UrlEncode(pollCurl, CPDLCMessage::hoppieCode)
-		+ "&from=" + UrlEncode(pollCurl, CPDLCMessage::hoppieICAO) + "&to=SERVER";
+	url = "https://www.hoppie.nl/acars/system/connect.html?logon=" + SituUrl::Encode(CPDLCMessage::hoppieCode)
+		+ "&from=" + SituUrl::Encode(CPDLCMessage::hoppieICAO) + "&to=SERVER";
 
 	if (CPDLCMessage::firstPeek) {
 		url += "&type=peek";
@@ -242,44 +217,25 @@ std::string CPDLCMessage::PollCPDLCMessages() { // Returns raw string of CPDLC m
 		url += "&type=poll";
 	}
 
-	//url = "https://ronyan.github.io/hoppie-html-test-cases/";
-
-	curl_easy_setopt(pollCurl, CURLOPT_URL, url.c_str());
-	curl_easy_setopt(pollCurl, CURLOPT_WRITEFUNCTION, write_data);
-	curl_easy_setopt(pollCurl, CURLOPT_TIMEOUT_MS, 2500L);
-	curl_easy_setopt(pollCurl, CURLOPT_WRITEDATA, &rawHoppiePollString);
-
-	auto res = curl_easy_perform(pollCurl);
-	if (res == CURLE_OPERATION_TIMEDOUT) {
-		rawHoppiePollString = "Error: Poll request to Hoppie Timed Out, retry connection";
+	const SituHttp::Response poll = SituHttp::Get(url, 2500);
+	if (!poll.ok) {
+		return "Error: Hoppie poll failed - " + poll.error;
 	}
-	curl_easy_cleanup(pollCurl);
 
-	return rawHoppiePollString;
-
+	return poll.body;
 }
 
 void CPDLCMessage::SendCPDLCMessage() {
 
-	std::string postResponse;
-
-	auto postCurl = curl_easy_init();
-	if (postCurl == nullptr) {
-		this->sent = false;
-		return;
-	}
-
-	// https, and every value percent-encoded - see PollCPDLCMessages and UrlEncode.
-	std::string url;
-	url = "https://www.hoppie.nl/acars/system/connect.html";
-	//url = "https://ronyan.github.io/hoppie-html-test-cases/";
+	// https, and every value percent-encoded - see PollCPDLCMessages and SituUrl::Encode.
+	const std::string url = "https://www.hoppie.nl/acars/system/connect.html";
 
 	std::string postfields = "logon=";
-	postfields += UrlEncode(postCurl, this->hoppieCode);
+	postfields += SituUrl::Encode(this->hoppieCode);
 	postfields += "&from=";
-	postfields += UrlEncode(postCurl, this->hoppieICAO);
+	postfields += SituUrl::Encode(this->hoppieICAO);
 	postfields += "&to=";
-	postfields += UrlEncode(postCurl, this->receipient);
+	postfields += SituUrl::Encode(this->receipient);
 
 	if (this->messageType == "cpdlc") {
 		// The packet is one field, so encode it whole once it is assembled. Encoding the
@@ -297,28 +253,23 @@ void CPDLCMessage::SendCPDLCMessage() {
 
 		postfields += "&type=cpdlc";
 		postfields += "&packet=";
-		postfields += UrlEncode(postCurl, packet);
+		postfields += SituUrl::Encode(packet);
 	}
 
 	if (this->messageType == "telex") {
 		postfields += "&type=telex";
 		postfields += "&packet=";
-		postfields += UrlEncode(postCurl, this->rawMessageContent);
+		postfields += SituUrl::Encode(this->rawMessageContent);
 	}
 
-	curl_easy_setopt(postCurl, CURLOPT_URL, url.c_str());
-	curl_easy_setopt(postCurl, CURLOPT_POSTFIELDS, postfields.c_str());
-	curl_easy_setopt(postCurl, CURLOPT_WRITEFUNCTION, write_data);
-	curl_easy_setopt(postCurl, CURLOPT_WRITEDATA, &postResponse);
-	auto res = curl_easy_perform(postCurl);
-	curl_easy_cleanup(postCurl);
+	// The send had no timeout at all, so a hung gateway blocked whoever called it for as
+	// long as the OS allowed. Five seconds, matching the poll's order of magnitude.
+	const SituHttp::Response post = SituHttp::Post(url, postfields, 5000);
 
-	if (res != CURLE_OK) {
-		this->sent = false;
-	}
-	else {
-		if (postResponse.substr(0, 2) == "ok") { this->sent = true; }
-	}
+	// Hoppie answers "ok" on success. Anything else - a transport failure, a non-2xx, or
+	// a 200 carrying an error string - leaves the message unsent so it is not treated as
+	// delivered.
+	this->sent = post.ok && post.body.compare(0, 2, "ok") == 0;
 
 }
 
@@ -345,8 +296,8 @@ std::string CPDLCMessage::MakePDCMessage(EuroScopePlugIn::CFlightPlan& flightpla
 
 	char letter = 'A'; // filler letter for now
 	std::string identifierLetter;
-	u_int pdcNumbers = (static_cast<u_int>(this->timeParsed) + seedInt) % 900 + 100; // 3 digit number, generate with hoppie ID
-	letter += (static_cast<u_int>(this->timeParsed) + seedInt) % 25;
+	unsigned int pdcNumbers = (static_cast<unsigned int>(this->timeParsed) + seedInt) % 900 + 100; // 3 digit number, generate with hoppie ID
+	letter += (static_cast<unsigned int>(this->timeParsed) + seedInt) % 25;
 	identifierLetter = letter;
 
 

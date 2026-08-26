@@ -239,7 +239,7 @@ public:
     // CPDLC downlink handoff.
     //
     // Upstream calls this work directly from OnRefresh, under the name asyncCPDLCFetch,
-    // so a slow Hoppie stalls drawing for the length of the curl timeout. It can run on a
+    // so a slow Hoppie stalls drawing for the length of the HTTP timeout. It can run on a
     // worker instead because cpdlc.cpp touches no EuroScope SDK - the only SDK reference
     // in that file is MakePDCMessage, which takes its CFlightPlan and CController as
     // parameters. So the thread polls and parses into the struct below, and the main
