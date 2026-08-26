@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "cpdlc.h"
+#include "CpdlcPacket.h"
 
 unsigned int CPDLCMessage::ids = 0;
 std::string CPDLCMessage::hoppieCode = "";
@@ -152,30 +153,25 @@ CPDLCMessage CPDLCMessage::parseDLMessage(std::string& rawMessage) { // breaks u
 
 		if (parsedMessage.messageType == "cpdlc") {
 
-			std::stringstream ss(result);
-			std::string token;
-			std::vector<std::string> components;
+			// The message is the remainder after the fifth delimiter, not the sixth of
+			// six fields. Splitting on '/' and taking a component truncated any message
+			// that contained a slash - a frequency pair, an altitude block - and the
+			// pop_back() that followed then removed a real character, because the
+			// closing brace it assumed was on a later component. See CpdlcPacket.h.
+			const SituCpdlcPacket::Packet packet = SituCpdlcPacket::Parse(result);
 
-			// Split the string using '/'
-			while (std::getline(ss, token, '/')) {
-				components.push_back(token);
-			}
-
-			if (components.size() >= 6) {
-
+			if (packet.valid) {
 
 				// Both fields come straight off the network. stoi throws
 				// std::invalid_argument on anything non-numeric and std::out_of_range on
 				// anything too large, and this runs inside a EuroScope callback, where an
-				// escaping exception terminates the process. The original guarded only
-				// against an empty string, and the try/catch a few lines above wraps the
-				// getline splitting, which cannot realistically throw, rather than these.
+				// escaping exception unwinds through a module boundary.
 				try {
-					if (!components.at(2).empty()) {
-						parsedMessage.messageID = stoi(components.at(2));
+					if (!packet.minField.empty()) {
+						parsedMessage.messageID = stoi(packet.minField);
 					}
-					if (!components.at(3).empty()) {
-						parsedMessage.responseToMessageID = stoi(components.at(3));
+					if (!packet.mrnField.empty()) {
+						parsedMessage.responseToMessageID = stoi(packet.mrnField);
 					}
 				}
 				catch (const std::exception&) {
@@ -184,11 +180,10 @@ CPDLCMessage CPDLCMessage::parseDLMessage(std::string& rawMessage) { // breaks u
 					parsedMessage.rawMessageContent = "INVALID DOWNLINK MESSAGE";
 					return parsedMessage;
 				}
-				parsedMessage.responseRequired = components.at(4);
-				if (components.at(5).length() > 1) {
-					parsedMessage.rawMessageContent = components.at(5);
-					parsedMessage.rawMessageContent.pop_back();
-				}
+
+				parsedMessage.responseRequired = packet.responseAttribute;
+				parsedMessage.rawMessageContent = packet.message;
+
 				// All D/L messages open mnemonic -> parsed in the display part
 				parsedMessage.opensMnemonic = true;
 			}
