@@ -108,7 +108,6 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="ACTag.cpp" />
-    <ClCompile Include="CACList.cpp" />
     <ClCompile Include="CAppWindows.cpp" />
     <ClCompile Include="CAsyncResponse.cpp" />
     <ClCompile Include="CFontHelper.cpp" />
@@ -131,7 +130,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ACTag.h" />
-    <ClInclude Include="CACList.h" />
     <ClInclude Include="CAppWindows.h" />
     <ClInclude Include="CAsyncResponse.h" />
     <ClInclude Include="CPopUpMenu.h" />

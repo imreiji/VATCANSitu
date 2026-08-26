@@ -30,13 +30,16 @@ CSiTRadar::CSiTRadar()
 
 #pragma region intializeLists
 	//initialize lists
-	ACList atisList, offScreenList;
+	ACList atisList, offScreenList, messageList;
 	atisList.listType = LIST_TIME_ATIS;
 	atisList.p = { 500,84 }; // Default Location
 	offScreenList.p = { 0,500 }; // Default Location
 	offScreenList.listType = LIST_OFF_SCREEN;
+	messageList.listType = LIST_MESSAGES;
+	messageList.p = { 800,84 }; // Default Location
 	acLists[LIST_TIME_ATIS] = atisList;
 	acLists[LIST_OFF_SCREEN] = offScreenList;
+	acLists[LIST_MESSAGES] = messageList;
 #pragma endregion
 
 	// load settings file
@@ -59,6 +62,14 @@ CSiTRadar::CSiTRadar()
 
 			acLists[LIST_OFF_SCREEN].p.x = j["offScreenList"]["x"];
 			acLists[LIST_OFF_SCREEN].p.y = j["offScreenList"]["y"];
+
+			// Guarded: a settings.json written before the message list existed has no such
+			// key, and reading it unguarded throws, which would abandon the rest of this
+			// block and silently drop every setting below it.
+			if (!j["messageList"].is_null()) {
+				acLists[LIST_MESSAGES].p.x = j["messageList"]["x"];
+				acLists[LIST_MESSAGES].p.y = j["messageList"]["y"];
+			}
 
 			menuState.numHistoryDots = j["menuState"]["numHistoryDots"];
 			menuState.bigACID = j["menuState"]["bigACID"];
@@ -89,6 +100,9 @@ CSiTRadar::CSiTRadar()
 
 			j["offScreenList"]["x"] = acLists[LIST_OFF_SCREEN].p.x;
 			j["offScreenList"]["y"] = acLists[LIST_OFF_SCREEN].p.y;
+
+			j["messageList"]["x"] = acLists[LIST_MESSAGES].p.x;
+			j["messageList"]["y"] = acLists[LIST_MESSAGES].p.y;
 
 			j["prefSFI"] = menuState.SFIPrefStringDefault;
 
@@ -164,6 +178,9 @@ CSiTRadar::~CSiTRadar()
 
 			j["offScreenList"]["x"] = acLists[LIST_OFF_SCREEN].p.x;
 			j["offScreenList"]["y"] = acLists[LIST_OFF_SCREEN].p.y;
+
+			j["messageList"]["x"] = acLists[LIST_MESSAGES].p.x;
+			j["messageList"]["y"] = acLists[LIST_MESSAGES].p.y;
 
 			j["prefSFI"] = menuState.SFIPrefStringDefault;
 
@@ -315,7 +332,6 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 			}
 
 			menuState.lastAcListMaint = clock();
-			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "menuState.squawkCodes:", to_string(menuState.squawkCodes.size()).c_str(), true, false, false, false, false);
 
 		}
 	}
@@ -426,21 +442,8 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 				DrawACList(acLists[LIST_TIME_ATIS].p, &dc, mAcData, LIST_TIME_ATIS);
 				DrawACList(acLists[LIST_OFF_SCREEN].p, &dc, mAcData, LIST_OFF_SCREEN);
+				DrawACList(acLists[LIST_MESSAGES].p, &dc, mAcData, LIST_MESSAGES);
 
-				/*
-				CACList MessageList;
-				MessageList.m_listType = LIST_MESSAGES;
-				MessageList.m_dc = &dc;
-				MessageList.origin = { 800,85 };
-				MessageList.m_collapsed = false;
-				vector<string> msgList;
-				msgList.push_back("NO CORRELATION MULTI DISCRETE");
-				msgList.push_back("MULT DSCRT UNASSOC 2456");
-				MessageList.m_header = "Message List";
-				if (!msgList.empty()) { MessageList.m_header += " (" + to_string(msgList.size()) + ")"; }
-				MessageList.PopulatetList(msgList);
-				MessageList.DrawList();
-				*/
 				
 
 
@@ -2988,6 +2991,9 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 	if (ObjectType == LIST_OFF_SCREEN) {
 		acLists[LIST_OFF_SCREEN].collapsed = !acLists[LIST_OFF_SCREEN].collapsed;
 	}
+	if (ObjectType == LIST_MESSAGES) {
+		acLists[LIST_MESSAGES].collapsed = !acLists[LIST_MESSAGES].collapsed;
+	}
 }
 
 void CSiTRadar::OnOverScreenObject(int ObjectType,
@@ -3134,6 +3140,9 @@ void CSiTRadar::OnMoveScreenObject(int ObjectType, const char* sObjectId, POINT 
 		}
 		if (ObjectType == LIST_OFF_SCREEN) {
 			acLists[LIST_OFF_SCREEN].p = { Pt.x - ((Area.right - Area.left) / 2), Pt.y - ((Area.bottom - Area.top) / 2) };
+		}
+		if (ObjectType == LIST_MESSAGES) {
+			acLists[LIST_MESSAGES].p = { Pt.x - ((Area.right - Area.left) / 2), Pt.y - ((Area.bottom - Area.top) / 2) };
 		}
 
 		if (ObjectType == WINDOW_TITLE_BAR) {
@@ -3686,6 +3695,70 @@ void CSiTRadar::DrawACList(POINT p, CDC* dc, unordered_map<string, ACData>& ac, 
 			}
 			dc->Polygon(vertices, 3);
 		}
+	}
+
+	if (listType == LIST_MESSAGES) {
+
+		// Derived from mAcData every frame, the same way the off-screen list is, rather
+		// than accumulated into a store. The correlation logic re-evaluates
+		// multipleDiscrete on every pass, so a message that is no longer true simply stops
+		// being drawn - no expiry, no stale entries, nothing to clear by hand.
+		//
+		// Codes are collected into a set first because several targets can be squawking
+		// the same duplicated code, and the controller only needs to be told once.
+		set<string> offendingCodes;
+
+		for (auto& aircraft : ac) {
+			if (!aircraft.second.multipleDiscrete) { continue; }
+
+			CRadarTarget rt = GetPlugIn()->RadarTargetSelect(aircraft.first.c_str());
+			if (!rt.IsValid()) { continue; }
+
+			offendingCodes.insert(rt.GetPosition().GetSquawk());
+		}
+
+		// An alert list with nothing to say is clutter, and a permanently visible empty
+		// one trains you to stop looking at it. Draw nothing at all when quiet.
+		if (offendingCodes.empty()) {
+			dc->RestoreDC(sDC);
+			DeleteObject(targetPen);
+			DeleteObject(targetBrush);
+			return;
+		}
+
+		header = "Message List (" + to_string(offendingCodes.size()) + ")";
+
+		dc->DrawText(header.c_str(), &listHeading, DT_LEFT | DT_CALCRECT);
+		dc->DrawText(header.c_str(), &listHeading, DT_LEFT);
+		AddScreenObject(LIST_MESSAGES, to_string(LIST_MESSAGES).c_str(), listHeading, true, "");
+
+		RECT listMsg{};
+		listMsg.left = p.x + 10;
+		listMsg.top = p.y + 13;
+
+		if (!acLists[LIST_MESSAGES].collapsed) {
+			// General condition first, then one line naming each duplicated code.
+			const string summary = "NO CORRELATION MULTI DISCRETE";
+			dc->DrawText(summary.c_str(), &listMsg, DT_LEFT | DT_CALCRECT);
+			dc->DrawText(summary.c_str(), &listMsg, DT_LEFT);
+			listMsg.top += 13;
+
+			for (const auto& code : offendingCodes) {
+				const string line = "MULT DSCRT UNASSOC " + code;
+				dc->DrawText(line.c_str(), &listMsg, DT_LEFT | DT_CALCRECT);
+				dc->DrawText(line.c_str(), &listMsg, DT_LEFT);
+				listMsg.top += 13;
+			}
+		}
+
+		POINT vertices[] = { {listHeading.right + 5, listHeading.top + 3}, {listHeading.right + 15, listHeading.top + 3} ,  {listHeading.right + 10, listHeading.top + 10} };
+		if (!acLists[LIST_MESSAGES].collapsed)
+		{
+			vertices[0] = { listHeading.right + 5, listHeading.top + 10 };
+			vertices[1] = { listHeading.right + 15, listHeading.top + 10 };
+			vertices[2] = { listHeading.right + 10, listHeading.top + 3 };
+		}
+		dc->Polygon(vertices, 3);
 	}
 
 	dc->RestoreDC(sDC);
