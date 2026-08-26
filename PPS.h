@@ -290,6 +290,5 @@ public:
 		return prect;
 	};
 
-    static void DrawCJS(CDC* dc, POINT p, string cjsText, COLORREF cjsColor);
 };
 
