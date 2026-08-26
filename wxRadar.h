@@ -568,6 +568,22 @@ private:
 
 public:
 
+    // Absolute path to the plugin's situWx folder, with a trailing backslash.
+    //
+    // Everything that touched this folder used the relative path ".\situWx\", which
+    // resolves against the process's current working directory - and EuroScope's working
+    // directory moves. Windows common dialogs change it to the last browsed folder unless
+    // OFN_NOCHANGEDIR is set, so opening a sector file, an ASR or a settings file drags the
+    // CWD somewhere new. The next weather refresh then created situWx wherever that
+    // happened to be, which is why the folder turned up scattered under the sector package.
+    //
+    // settings.json had the same problem and it mattered more: the plugin read and wrote
+    // its settings at whatever path the CWD pointed at, so saved list positions, weather
+    // centre and SFI preferences could be written to one folder and looked for in another.
+    //
+    // Resolved from this DLL's own location, which does not move.
+    static std::string getSituWxDir();
+
     static void loadPNG(std::vector<unsigned char>& buffer, const std::string& filename); //designed for loading files from hard disk in an std::vector
 
     static void parseRadarPNG(CRadarScreen* rad); 
@@ -593,7 +609,10 @@ public:
 
         if (rainViewerJson)
         {
-            curl_easy_setopt(rainViewerJson, CURLOPT_URL, "https://api.rainviewer.com/public/maps.json");
+            // maps.json was retired. It returned a flat array of timestamps, so the parse
+            // below took j.back(). weather-maps.json returns an object, and reading it with
+            // the old parse threw on every refresh - the crash reported upstream.
+            curl_easy_setopt(rainViewerJson, CURLOPT_URL, "https://api.rainviewer.com/public/weather-maps.json");
             curl_easy_setopt(rainViewerJson, CURLOPT_WRITEFUNCTION, write_data);
             curl_easy_setopt(rainViewerJson, CURLOPT_WRITEDATA, &rainViewerJsonString);
             CURLcode res;
@@ -602,8 +621,15 @@ public:
         }
 
         try {
-            json j = json::parse(rainViewerJsonString.c_str());
-            wxRadar::ts = to_string(j.back());
+            json j = json::parse(rainViewerJsonString);
+
+            // ts now carries a whole URL prefix (host + the newest radar frame's path)
+            // rather than a bare timestamp, so the tile URL in parseRadarPNG no longer
+            // hardcodes the tilecache host.
+            const string host = j["host"];
+            const string path = j["radar"]["past"].back()["path"];
+
+            wxRadar::ts = host + path;
         }
         catch (exception& e) {
             rad->GetPlugIn()->DisplayUserMessage("VATCANSitu", "Error", string("Failed to get RainViewer JSON" + string(e.what())).c_str(), true, true, true, true, true);

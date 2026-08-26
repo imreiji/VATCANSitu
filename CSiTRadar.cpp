@@ -50,7 +50,12 @@ CSiTRadar::CSiTRadar()
 			}
 		}
 
-		std::ifstream settings_file(".\\situWx\\settings.json");
+		// Absolute, so the settings are read from the same place they were written to.
+		// The old ".\situWx\settings.json" resolved against EuroScope's working directory,
+		// which moves whenever a file dialog is used.
+		const std::string situWxSettings = wxRadar::getSituWxDir() + "settings.json";
+
+		std::ifstream settings_file(situWxSettings.c_str());
 		if (settings_file.is_open()) {
 			json j = json::parse(settings_file);
 
@@ -89,7 +94,9 @@ CSiTRadar::CSiTRadar()
 		}
 		// write defaults if no file
 		else {
-			std::ofstream settings_file(".\\situWx\\settings.json");
+			// The folder may not exist yet - the weather path is what usually creates it.
+			CreateDirectoryA(wxRadar::getSituWxDir().c_str(), NULL);
+			std::ofstream settings_file(situWxSettings.c_str());
 
 			json j;
 			j["wxlat"] = wxRadar::wxLatCtr;
@@ -165,9 +172,11 @@ CSiTRadar::~CSiTRadar()
 	// Save settings file
 	try {
 
-		std::ifstream settings_file(".\\situWx\\settings.json");
+		const std::string situWxSettings = wxRadar::getSituWxDir() + "settings.json";
+
+		std::ifstream settings_file(situWxSettings.c_str());
 		if (settings_file.is_open()) {
-			std::ofstream settings_file(".\\situWx\\settings.json");
+			std::ofstream settings_file(situWxSettings.c_str());
 
 			json j;
 			j["wxlat"] = wxRadar::wxLatCtr;
