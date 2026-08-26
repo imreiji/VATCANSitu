@@ -150,18 +150,6 @@ namespace SituCpdlcAtis
         return tokens;
     }
 
-    // Text inside the first [...] on the line, uppercased. Controllers use brackets to
-    // set the code apart from the surrounding prose, so it is the strongest signal
-    // available and is tried first.
-    inline std::string BracketedToken(const std::string& upperLine)
-    {
-        const size_t open = upperLine.find('[');
-        if (open == std::string::npos) { return std::string(); }
-        const size_t close = upperLine.find(']', open + 1);
-        if (close == std::string::npos) { return std::string(); }
-        return upperLine.substr(open + 1, close - open - 1);
-    }
-
     inline Declaration Parse(const std::vector<std::string>& atisLines)
     {
         Declaration result;
@@ -187,44 +175,61 @@ namespace SituCpdlcAtis
             if (!hasCpdlc) { continue; }
             if (!result.station.empty()) { continue; }
 
-            // 1. Bracketed, the clearest form.
-            const std::string bracketed = BracketedToken(upper);
-            if (LooksLikeStation(bracketed)) { result.station = bracketed; continue; }
-
-            // 2. The token after LOGON or ON. Both are used as "the station is next".
+            // Attribute each code to the datalink keyword that owns it, rather than
+            // taking the first one on the line.
+            //
+            // A line naming both services with different codes is real, and taking the
+            // first code sends an en route uplink to a departure clearance address when
+            // PDC happens to be written first - "PDC on EDDH, CPDLC on EDWW" yielded
+            // EDDH. Position is not ownership.
+            //
+            // Adjacent keywords are one compound owner: "CPDLC/PDC on EDWK" is a single
+            // station serving both, and the code after it belongs to CPDLC as much as
+            // to PDC. Adjacency here means consecutive tokens, so the separator between
+            // them - a slash, a dash, a space - does not matter.
             const std::vector<std::string> tokens = Tokenise(upper);
-            for (size_t i = 0; i + 1 < tokens.size(); ++i)
-            {
-                if ((tokens[i] == "LOGON" || tokens[i] == "ON") && LooksLikeStation(tokens[i + 1]))
-                {
-                    result.station = tokens[i + 1];
-                    break;
-                }
-            }
-            if (!result.station.empty()) { continue; }
 
-            // 3. A bare four character token after the datalink word, as in "CPDLC MWS2".
-            //    Only taken when the line offers one distinct candidate, so a line
-            //    naming several different codes is left for a human rather than
-            //    guessed at. Repeats of the same code are not ambiguity: a real line
-            //    reads "PDC LFPG | Charts chartfox.org/LFPG", where counting
-            //    occurrences rather than distinct values would throw the answer away.
+            bool ownerIsCpdlc = false;
+            bool haveOwner = false;
+            bool previousWasKeyword = false;
+
             std::string candidate;
             bool ambiguous = false;
-            bool seenDatalinkWord = false;
+
             for (const std::string& token : tokens)
             {
-                if (token == "CPDLC" || token == "PDC" || token == "DCL")
+                const bool isKeyword = (token == "CPDLC" || token == "PDC" || token == "DCL");
+
+                if (isKeyword)
                 {
-                    seenDatalinkWord = true;
+                    if (previousWasKeyword)
+                    {
+                        // Compound: fold into the owner already open.
+                        ownerIsCpdlc = ownerIsCpdlc || (token == "CPDLC");
+                    }
+                    else
+                    {
+                        ownerIsCpdlc = (token == "CPDLC");
+                    }
+                    haveOwner = true;
+                    previousWasKeyword = true;
                     continue;
                 }
-                if (seenDatalinkWord && LooksLikeStation(token))
-                {
-                    if (candidate.empty()) { candidate = token; }
-                    else if (candidate != token) { ambiguous = true; }
-                }
+
+                previousWasKeyword = false;
+
+                // LOGON and ON introduce the code; they do not end the owner.
+                if (token == "LOGON" || token == "ON") { continue; }
+
+                if (!haveOwner || !ownerIsCpdlc) { continue; }
+                if (!LooksLikeStation(token)) { continue; }
+
+                // Repeats of one code are not ambiguity: a real line reads
+                // "CPDLC LFPG | Charts chartfox.org/LFPG".
+                if (candidate.empty()) { candidate = token; }
+                else if (candidate != token) { ambiguous = true; }
             }
+
             if (!ambiguous) { result.station = candidate; }
         }
 

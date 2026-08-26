@@ -199,6 +199,21 @@ int main()
     CheckDeclares({"Callsign BREMEN RADAR - CPDLC/PDC on EDWK (CPDLC above FL285 only!)"},
                   "EDWK", "CPDLC and PDC together");
 
+    // --- A code belongs to the keyword that owns it, not to its position on the line.
+    //     Both services with different codes on one line is real, and taking the first
+    //     code sent an en route uplink to a departure clearance address whenever PDC
+    //     was written first.
+    CheckDeclares({"PDC on EDDH, CPDLC on EDWW"}, "EDWW", "PDC written first, prose");
+    CheckDeclares({"PDC [EDDH] CPDLC [EDWW]"}, "EDWW", "PDC written first, bracketed");
+    CheckDeclares({"PDC/DCL EDDH - CPDLC EDWW"}, "EDWW", "PDC compound written first");
+    CheckDeclares({"CPDLC on EDWW, PDC on EDDH"}, "EDWW", "CPDLC written first, same answer");
+    CheckDeclares({"CPDLC [EDWW] PDC [EDDH]"}, "EDWW", "CPDLC written first, bracketed");
+
+    // --- Adjacent keywords are one owner: a single station serving both services.
+    CheckDeclares({"CPDLC/PDC on EDWK"}, "EDWK", "CPDLC/PDC share one code");
+    CheckDeclares({"PDC/CPDLC on EDWK"}, "EDWK", "the compound works in either order");
+    CheckDeclares({"CPDLC/DCL [OEJD]"}, "OEJD", "CPDLC/DCL share one code");
+
     // --- Placeholders are not stations.
     {
         ++g_checks;
