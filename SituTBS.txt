@@ -1,0 +1,62 @@
+// SituTBS.txt - Time Based Separation configuration for VATCANSitu.
+//
+// TBS draws a marker on final approach showing where the following aircraft should be.
+// The spacing is the lesser of a fixed distance and a time converted to distance at the
+// aircraft's current groundspeed, which is what makes it time based: into a headwind the
+// aircraft is slower, the distance shrinks, and the time behind the leader stays the
+// same.
+//
+// Same format as SituCPDLC.txt - // comments, Key=Value, TYPE:field:field.
+//
+// All of this was compiled into the plugin, gated on the destination being CYYZ, with
+// Toronto's magnetic variation written as a bare 10 in two places with opposite signs.
+// It is here so it can be read, checked against the AIP and changed without a rebuild.
+
+[AIRPORTS]
+// AIRPORT:<icao>:<magnetic variation>
+//
+// Variation is degrees to ADD to a magnetic heading to get a true one, so west
+// variation is negative. EuroScope reports track in true and runway headings are set in
+// magnetic; this is what reconciles the two. An airport absent from this list has no TBS
+// marker drawn, which is how the feature stays off where it is not wanted.
+AIRPORT:CYYZ:10
+
+[GATE]
+// When the marker is drawn at all. Every one of these was a bare number inside the draw.
+MinDistance=1
+MaxDistance=20
+MinAltitude=500
+HeadingTolerance=7
+
+// Floor applied on a mixed mode runway, where departures share the strip.
+MixedModeMinimum=5
+
+[SEPARATION]
+// SEP:<leader wtc>:<follower wtc>:<distance nm>:<time seconds>
+//
+// Wake categories are the ICAO letters - L light, M medium, H heavy, J super - or * for
+// any. Rows are tried in file order and the first match wins, so a specific row must
+// come before a wildcard that would also match it.
+//
+// Transcribed from the compiled table. Worth checking against the AIP rather than
+// trusting: a super behind a heavy is 3nm here while a super behind a super is 4, which
+// is plausible but is the kind of asymmetry that wants confirming.
+
+// Light leader - one rule for every follower.
+SEP:L:*:3:68
+
+// Medium leader.
+SEP:M:L:4:90
+SEP:M:*:3:68
+
+// Heavy leader.
+SEP:H:L:6:135
+SEP:H:M:5:113
+SEP:H:H:4:90
+SEP:H:J:3:68
+
+// Super leader.
+SEP:J:L:8:180
+SEP:J:M:7:158
+SEP:J:H:6:135
+SEP:J:J:4:90
