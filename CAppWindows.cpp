@@ -592,7 +592,9 @@ void SListBox::RenderCPDLCListBox(POINT winOrigin) {
 	m_width = rowWidth;
 
 	const int firstRow = m_LB_firstElem_idx;
-	const int lastRow = std::min(m_last_element, firstRow + m_max_elements);
+	// Not std::min: windows.h defines min as a macro, which swallows the qualification.
+	int lastRow = firstRow + m_max_elements;
+	if (lastRow > m_last_element) { lastRow = m_last_element; }
 
 	int deltay = 0;
 	for (int i = firstRow; i < lastRow; i++) {
