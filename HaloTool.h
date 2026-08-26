@@ -34,6 +34,26 @@ public:
     // roughly 0.001 nm at CZQM latitudes and 0.014 nm with 0.04 degrees of bearing error
     // at 82 N. Sub-pixel on any realistic scale, so this is a correctness fix rather than
     // a visible one.
+    // Initial great circle bearing from one position to another, in degrees true.
+    //
+    // CPosition::DirectionTo returns a magnetic bearing, using the sector file's
+    // deviation value, and the deviation itself is not exposed. The TBS geometry runs on
+    // spherical trigonometry and needs a true bearing, so it is computed here rather
+    // than converted back from a magnetic one with a constant somebody has to maintain.
+    static double bearingBetween(CPosition from, CPosition to)
+    {
+        const double lat1 = degtorad(from.m_Latitude);
+        const double lat2 = degtorad(to.m_Latitude);
+        const double deltaLon = degtorad(to.m_Longitude - from.m_Longitude);
+
+        const double y = sin(deltaLon) * cos(lat2);
+        const double x = cos(lat1) * sin(lat2) - sin(lat1) * cos(lat2) * cos(deltaLon);
+
+        double bearing = atan2(y, x) * 180.0 / PI;
+        if (bearing < 0) { bearing += 360.0; }
+        return bearing;
+    }
+
     static CPosition destinationPoint(CPosition origin, double angularDistance, double bearing)
     {
         const double lat1 = degtorad(origin.m_Latitude);

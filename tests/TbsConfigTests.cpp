@@ -121,12 +121,20 @@ int main(int argc, char** argv)
     CheckNear(config.gate.headingToleranceDeg, 7.0, "heading tolerance");
     CheckNear(config.gate.mixedModeMinimumNm, 5.0, "mixed mode minimum");
 
-    // --- The airport and its variation, which was a bare 10 in two places.
+    // --- The airport list is opt-in and carries nothing else. The magnetic variation
+    //     that used to live here is gone: the course now comes from the runway's own
+    //     thresholds, which is true already.
     {
-        const Airport* toronto = FindAirport(config, "CYYZ");
-        Check(toronto != nullptr, "CYYZ is configured");
-        if (toronto != nullptr) { CheckNear(toronto->magneticVariation, 10.0, "CYYZ variation"); }
+        Check(FindAirport(config, "CYYZ") != nullptr, "CYYZ is configured");
         Check(FindAirport(config, "CYOW") == nullptr, "an unlisted airport has no TBS");
+    }
+
+    // --- A file written against the old two field form keeps its airports rather than
+    //     losing them, since the second field is simply ignored now.
+    {
+        const Config legacy = Parse(SituConfig::Parse("[AIRPORTS]\nAIRPORT:CYYZ:10\nAIRPORT:CYOW\n"));
+        Check(legacy.airports.size() == 2, "both forms are accepted");
+        Check(legacy.rejectedLines.empty(), "and neither is reported as bad");
     }
 
     // --- The whole matrix against the compiled table it replaces, over a range of

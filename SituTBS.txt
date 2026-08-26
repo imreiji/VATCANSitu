@@ -13,13 +13,18 @@
 // It is here so it can be read, checked against the AIP and changed without a rebuild.
 
 [AIRPORTS]
-// AIRPORT:<icao>:<magnetic variation>
+// AIRPORT:<icao>
 //
-// Variation is degrees to ADD to a magnetic heading to get a true one, so west
-// variation is negative. EuroScope reports track in true and runway headings are set in
-// magnetic; this is what reconciles the two. An airport absent from this list has no TBS
-// marker drawn, which is how the feature stays off where it is not wanted.
-AIRPORT:CYYZ:10
+// An opt-in list and nothing more. The approach course could be derived for every
+// airport in the sector file, but markers at all of them is not what anyone wants, so
+// TBS is drawn only where an airport is named here.
+//
+// There is deliberately no magnetic variation. The course comes from the active arrival
+// runway's two thresholds, which is a true bearing already, and the typed course in the
+// menu is matched against the runway designator, which is magnetic on both sides.
+// Neither path needs a variation, so there is no local constant here to get wrong and
+// nothing to revise when the magnetic model moves.
+AIRPORT:CYYZ
 
 [GATE]
 // When the marker is drawn at all. Every one of these was a bare number inside the draw.

@@ -24,14 +24,18 @@
 
 namespace SituTbs
 {
+    // An opt-in list, nothing more. TBS is drawn only at airports named here, because
+    // the approach course can be derived for every airport in the sector file and
+    // markers at all of them is not what anyone wants.
+    //
+    // There is deliberately no magnetic variation here. The course comes from the
+    // active arrival runway's two thresholds, which gives a true bearing directly, and
+    // the typed course is matched against the runway designator, which is magnetic on
+    // both sides. Neither path needs a variation, so none is stored - one fewer local
+    // constant to get wrong, and nothing to revise when the magnetic model moves.
     struct Airport
     {
         std::string icao;
-
-        // Degrees to add to a magnetic heading to get a true one. EuroScope reports
-        // track in true and the runway heading is set in magnetic, so this is what
-        // reconciles them. West variation is negative.
-        double magneticVariation = 0.0;
     };
 
     // When the marker is drawn at all. These were bare numbers inside the draw.
@@ -153,16 +157,17 @@ namespace SituTbs
 
             if (record.type == "AIRPORT")
             {
-                // AIRPORT:<icao>:<magnetic variation>
-                if (record.fields.size() < 2) { config.rejectedLines.push_back(record.line); continue; }
-
-                Airport airport;
-                airport.icao = record.fields[0];
-                if (airport.icao.empty() || !ToDouble(record.fields[1], airport.magneticVariation))
+                // AIRPORT:<icao>. Any further fields are ignored: this line used to
+                // carry a magnetic variation, and a file written against that form
+                // should keep working rather than losing the airport.
+                if (record.fields.empty() || record.fields[0].empty())
                 {
                     config.rejectedLines.push_back(record.line);
                     continue;
                 }
+
+                Airport airport;
+                airport.icao = record.fields[0];
                 config.airports.push_back(airport);
                 continue;
             }

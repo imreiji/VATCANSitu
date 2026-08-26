@@ -27,6 +27,19 @@ struct inactiveRunway {
     EuroScopePlugIn::CPosition end2;
 };
 
+// An arrival runway that the sector file currently has active, with the course an
+// aircraft landing on it flies.
+//
+// trueCourse is computed from the two thresholds, so it needs no magnetic variation.
+// magneticDesignator is the runway number times ten - 05 is 50 - which is what a typed
+// course in the menu is matched against, magnetic on both sides.
+struct ActiveArrivalRunway {
+    std::string airport;
+    std::string name;
+    double trueCourse{ 0.0 };
+    int magneticDesignator{ 0 };
+};
+
 struct ACRoute {
     std::vector<EuroScopePlugIn::CPosition> route_fix_positions;
     std::vector<std::string> fix_names;
