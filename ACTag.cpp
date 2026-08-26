@@ -1580,10 +1580,6 @@ void CACTag::DrawFPConnector(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlig
 	DeleteObject(targetPen);
 }
 
-void CACTag::DrawRTConnector(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPlan *fp, COLORREF color, unordered_map<string, POINT> *tOffset)
-{
-}
-
 void CACTag::DrawHistoryDots(CDC *dc, CRadarTarget *rt)
 {
 	int sDC = dc->SaveDC();

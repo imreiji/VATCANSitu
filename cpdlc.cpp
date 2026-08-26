@@ -161,13 +161,8 @@ CPDLCMessage CPDLCMessage::parseDLMessage(std::string& rawMessage) { // breaks u
 			std::vector<std::string> components;
 
 			// Split the string using '/'
-			try {
-				while (std::getline(ss, token, '/')) {
-					components.push_back(token);
-				}
-			}
-			catch (std::exception &e) {
-
+			while (std::getline(ss, token, '/')) {
+				components.push_back(token);
 			}
 
 			if (components.size() >= 6) {
@@ -357,22 +352,18 @@ std::string CPDLCMessage::MakePDCMessage(EuroScopePlugIn::CFlightPlan& flightpla
 
 	// truncate the route if too long
 	std::string rteStr = flightplan.GetFlightPlanData().GetRoute();
-	int nCharacters = 52;
+	const size_t nCharacters = 52;
 
 	if (rteStr.length() > nCharacters) {
 
-		int index = nCharacters;
-		std::string substringBeforeSpace;
-		while (index < rteStr.length()) {
-			if (rteStr[index] == ' ') {
-				// Extract substring before the space
-				substringBeforeSpace = rteStr.substr(0, index);
-				break;
-			}
-			index++;
-		}
+		// Break at the first space at or after the limit, so the route is cut between
+		// waypoints rather than through one.
+		const size_t space = rteStr.find(' ', nCharacters);
 
-		rteStr = substringBeforeSpace + "// FILED ROUTE";
+		// A route with no space after the limit is one long token with no clean break.
+		// Cut it at the limit: this used to leave substringBeforeSpace empty and send
+		// "// FILED ROUTE" with no route in front of it at all.
+		rteStr = rteStr.substr(0, (space == std::string::npos) ? nCharacters : space) + "// FILED ROUTE";
 	}
 	else if (rteStr.length() == nCharacters) {
 		rteStr += "// FILED ROUTE";

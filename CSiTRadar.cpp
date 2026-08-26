@@ -916,19 +916,7 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 						}
 					}
 					
-					// ADSB targets; if no primary or secondary radar, but the plane has ADSB equipment suffix (assumed space based ADS-B with no gaps)
-					/*
-					if (radarTarget.GetPosition().GetRadarFlags() == 0
-						&& isADSB) {
-						if (mAcData[callSign].tagType != 0 && mAcData[callSign].tagType != 1) { mAcData[callSign].tagType = 1; }
-
-						CACTag::DrawRTACTag(&dc, this, &radarTarget, &GetPlugIn()->FlightPlanSelect(callSign.c_str()), &rtagOffset);
-						CACTag::DrawRTConnector(&dc, this, &radarTarget, &GetPlugIn()->FlightPlanSelect(callSign.c_str()), C_PPS_YELLOW, &rtagOffset);
-						CACTag::DrawHistoryDots(&dc, &radarTarget);
-					}
-					*/
-
-					// Tag Level Logic
+						// Tag Level Logic
 					if (menuState.nearbyCJS.find(radarTarget.GetCorrelatedFlightPlan().GetTrackingControllerId()) != menuState.nearbyCJS.end() &&
 						menuState.nearbyCJS.at(radarTarget.GetCorrelatedFlightPlan().GetTrackingControllerId())) {
 						// Open tags for quick looked targets

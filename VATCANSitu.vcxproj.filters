@@ -24,25 +24,16 @@
     <ClCompile Include="SituPlugin.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="HaloTool.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="CSiTRadar.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="ACTag.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="PPS.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="wxRadar.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="picopng.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="CAsyncResponse.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="CPopUpMenu.cpp">
