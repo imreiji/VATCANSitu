@@ -154,3 +154,18 @@ const int WINDOW_DIRECT_TO = 6007;
 const int WINDOW_SCROLL_ARROW_UP = 6008;
 const int WINDOW_SCROLL_ARROW_DOWN = 6009;
 const int WINDOW_FREE_TEXT = 6010;
+const int WINDOW_CPDLC = 6011;
+const int WINDOW_CPDLC_EDITOR = 6012;
+
+// Text fields
+// A text field with no type is a plain single-line editable field, which is what every
+// pre-CPDLC window uses; the CPDLC types render a message rather than an edit box.
+const int TEXTFIELD_PLAIN = 0;
+const int TEXTFIELD_CPDLC_MESSAGE = 6050;
+const int TEXTFIELD_CPDLC_PENDING_UPLINK = 6051;
+
+// Height of one row in the CPDLC message list, in pixels.
+const int CPDLC_ROW_HEIGHT = 17;
+
+// How much of a message body fits on one row before it is truncated with a chevron.
+const int CPDLC_ROW_TEXT_CHARS = 25;

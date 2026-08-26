@@ -1,12 +1,22 @@
 #pragma once
 #include "SituPlugin.h"
 #include "constants.h"
+#include "cpdlc.h"
+#include <algorithm>
 #include <vector>
 #include "CFontHelper.h"
 
 struct SWindowElements {
 	RECT titleBarRect;
 	vector<RECT> ListBoxRect;
+};
+
+// A fixed label drawn on a window - a column heading or a section title. Not clickable
+// and not editable, unlike STextField.
+struct SWindowText {
+	POINT location;
+	string text;
+	void RenderText(CDC* m_dc, POINT origin);
 };
 
 struct SListBoxScrollBar {
@@ -103,8 +113,17 @@ struct SListBoxElement {
 	int m_listElementHeight;
 	bool m_selected_{ false };
 	string m_ListBoxElementText;
+	// Set for elements in a CPDLC list box, where the row is rendered from the message
+	// rather than from m_ListBoxElementText.
+	CPDLCMessage m_cpdlc_message;
 	RECT m_ListBoxRect;
 
+	SListBoxElement(int width, const CPDLCMessage& message) {
+		m_width = width;
+		m_cpdlc_message = message;
+		m_elementID = m_elementIDcount;
+		m_elementIDcount++;
+	}
 	SListBoxElement(int width, string text) {
 		m_width = width;
 		m_ListBoxElementText = text;
@@ -134,6 +153,9 @@ struct STextField {
 	string m_text;
 	RECT m_textRect;
 	POINT m_location_;
+	int m_textfield_type{ TEXTFIELD_PLAIN };
+	// Set for the CPDLC text field types, which render this rather than m_text.
+	CPDLCMessage m_cpdlcmessage;
 
 	STextField() {
 		m_textFieldID = m_textFieldIDcount;
@@ -156,10 +178,10 @@ struct SListBox {
 	int m_width;
 	unsigned long m_ListBoxID;
 	int m_windowID_;
-	int m_nearestPtIdx;
+	int m_nearestPtIdx{ 0 };
 	int m_LB_firstElem_idx{ 0 };
 	int m_max_elements;
-	int m_last_element;
+	int m_last_element{ 0 };
 	int m_height;
 	bool m_has_scroll_bar{ false };
 	string selectItem{};
@@ -175,6 +197,12 @@ struct SListBox {
 	void PopulateListBox(std::vector<string> lb_e_vector){
 		for (auto& lbe : lb_e_vector) {
 			listBox_.emplace_back(SListBoxElement(300, lbe));
+		}
+	}
+	void PopulateCPDLCListBox(const vector<CPDLCMessage>& msgs) {
+		listBox_.clear(); // rebuilt from scratch on every refresh
+		for (const auto& msg : msgs) {
+			listBox_.emplace_back(SListBoxElement(330, msg));
 		}
 	}
 	void PopulateDirectListBox(ACRoute* rte, CFlightPlan fp) {
@@ -219,6 +247,18 @@ struct SListBox {
 		}
 	}
 	void RenderListBox(int firstElem, int numElem, int maxElements, POINT winOrigin);
+
+	// One drawn row of a CPDLC list: the message it shows, whether it is a reply drawn
+	// under the message it answers, which dialogue it belongs to for zebra striping, and
+	// whether that dialogue is still waiting on the other end.
+	struct CPDLCRow {
+		SListBoxElement* element;
+		bool isReply;
+		int stripe;
+		bool dialogueOpen;
+	};
+	std::vector<CPDLCRow> FlattenCPDLCRows();
+	void RenderCPDLCListBox(POINT winOrigin);
 	void ScrollUp() {
 		if (m_LB_firstElem_idx > 0) {
 			m_LB_firstElem_idx--;
@@ -249,6 +289,7 @@ struct SWindowButton {
 	string text;
 	RECT m_WindowButtonRect;
 	CDC* m_dc;
+	COLORREF m_textcolor{ C_MENU_TEXT_WHITE };
 
 	SWindowButton() {}
 	
@@ -262,7 +303,7 @@ struct SWindowButton {
 		int sDC = m_dc->SaveDC();
 
 		m_dc->SelectObject(CFontHelper::Segoe14);
-		m_dc->SetTextColor(RGB(230, 230, 230));
+		m_dc->SetTextColor(m_textcolor);
 
 		HPEN targetPen = CreatePen(PS_SOLID, 1, C_MENU_GREY1);
 		HBRUSH targetBrush = CreateSolidBrush(C_MENU_GREY3);
@@ -300,12 +341,15 @@ public:
 	POINT m_origin;
 	string windowTitle;
 	bool m_visible_;
+	// Each window owns its list boxes, buttons, editable text fields and static labels.
 	vector<SListBox> m_listboxes_;
 	vector<SWindowButton> m_buttons_;
 	vector<STextField> m_textfields_;
+	vector<SWindowText> m_text_;
 
 	CAppWindows();
 	CAppWindows(POINT origin, int winType, CFlightPlan fp, RECT radarea, vector<string>* lbElements);
+	CAppWindows(POINT origin, int winType, CFlightPlan& fp, RECT radarea, const vector<CPDLCMessage>& cpdlcmsgs);
 	CAppWindows(POINT origin, int winType, CFlightPlan fp, RECT radarea, ACRoute* rte);
 	CAppWindows(POINT origin, int winType, CFlightPlan fp, RECT radarea);
 	CAppWindows(POINT origin, int winType, RECT radarea);

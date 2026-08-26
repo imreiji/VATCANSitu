@@ -4,6 +4,7 @@
 CFont CFontHelper::Euroscope14;
 CFont CFontHelper::EuroscopeBold;
 CFont CFontHelper::Euroscope16;
+CFont CFontHelper::EuroscopeFixed14;
 CFont CFontHelper::Segoe12;
 CFont CFontHelper::Segoe14;
 
@@ -24,6 +25,11 @@ void CFontHelper::CreateFonts()
 	lgfont.lfWeight = 500;
 	lgfont.lfHeight = 16;
 	CFontHelper::Euroscope16.CreateFontIndirect(&lgfont);
+
+	lgfont.lfHeight = 14;
+	lgfont.lfWidth = 6;
+	CFontHelper::EuroscopeFixed14.CreateFontIndirect(&lgfont);
+	lgfont.lfWidth = 0;
 
 
 	lgfont.lfWeight = 700;
@@ -47,6 +53,7 @@ void CFontHelper::DeleteFonts() {
 	// destructor becomes a no-op.
 	CFontHelper::Euroscope14.DeleteObject();
 	CFontHelper::Euroscope16.DeleteObject();
+	CFontHelper::EuroscopeFixed14.DeleteObject();
 	CFontHelper::EuroscopeBold.DeleteObject();
 	CFontHelper::Segoe12.DeleteObject();
 	CFontHelper::Segoe14.DeleteObject();

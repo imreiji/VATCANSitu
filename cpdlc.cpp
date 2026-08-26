@@ -553,6 +553,21 @@ void CPDLCMessage::processMessage() { // should loop with every Poll try resendi
 
 }
 
+// "HH:MM" for display next to a message. ZuluTimeStringGen is the wire format, "HHMM"
+// for the current time; this one formats a time we already hold.
+std::string CPDLCMessage::ZuluTimeFormated(std::time_t time) {
+
+	std::tm timeInfoUTC;
+
+	if (gmtime_s(&timeInfoUTC, &time) != 0) {
+		return "--:--";
+	}
+
+	std::ostringstream oss;
+	oss << std::put_time(&timeInfoUTC, "%H:%M");
+	return oss.str();
+}
+
 std::string CPDLCMessage::ZuluTimeStringGen() {
 
 	auto currentTime = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
