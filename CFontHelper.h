@@ -8,6 +8,9 @@ public:
 	static CFont Euroscope14;
 	static CFont EuroscopeBold;
 	static CFont Euroscope16;
+	// Fixed pitch, for the CPDLC message list and message fields, whose columns are
+	// aligned by padding the string rather than by measuring it.
+	static CFont EuroscopeFixed14;
 	static CFont Segoe12;
 	static CFont Segoe14;
 

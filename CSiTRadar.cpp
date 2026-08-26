@@ -46,6 +46,15 @@ void CSiTRadar::StartCPDLCPoll()
 
 		result.ready = true;
 
+		// A peek only applies to the first fetch after logon; later fetches poll, which
+		// consumes. Flipped here on the worker rather than at the call site, because the
+		// flag is read twice during one fetch - once to build the URL, and again by
+		// parseDLMessage, which strips the leading Hoppie message id only in peek mode - so
+		// it must not change between those two points. Upstream flips it in the button
+		// handler and never sets it back, so a logoff and logon in the same session skipped
+		// the peek entirely; the logon handler now re-arms it.
+		CPDLCMessage::firstPeek = false;
+
 		std::lock_guard<std::mutex> lock(cpdlcPollMutex);
 		cpdlcPollResult = result;
 		cpdlcPollInFlight = false;
@@ -1446,6 +1455,15 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 						but = TopMenu::DrawBut(&dc, but_bigACID);
 						ButtonToScreen(this, but, "Big ACID Toggle", BUTTON_MENU_SETUP);
 
+						// CPDLC: the Hoppie logon ICAO, and a toggle that starts and stops
+						// polling. The button lights while connected.
+						auto cpdlcICAO = TopMenu::MakeField(dc, { 225, 38 }, 28, 15, CPDLCMessage::hoppieICAO.c_str());
+						AddScreenObject(BUTTON_MENU_CPDLC, "cpdlcICAO", cpdlcICAO, 0, "");
+
+						menuButton but_cpdlcLogon = { {257, 36}, "Logon", 38, 20, C_MENU_GREY3, C_MENU_GREY2, C_MENU_TEXT_WHITE, menuState.CPDLCOn };
+						but = TopMenu::DrawBut(&dc, but_cpdlcLogon);
+						ButtonToScreen(this, but, "CPDLC Logon", BUTTON_MENU_SETUP);
+
 						menuButton but_close_setup = { {245, 170}, "Close", 50, 20, C_MENU_GREY3, C_MENU_GREY2, C_MENU_TEXT_WHITE, 0 };
 						but = TopMenu::DrawBut(&dc, but_close_setup);
 						ButtonToScreen(this, but, "Close Setup", BUTTON_MENU_SETUP);
@@ -2752,8 +2770,31 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 		if (!strcmp(sObjectId, "Big ACID Toggle")) {
 			menuState.bigACID = !menuState.bigACID;
 		}
+		if (!strcmp(sObjectId, "CPDLC Logon")) {
+			menuState.CPDLCOn = !menuState.CPDLCOn;
+
+			if (menuState.CPDLCOn) {
+				// Poll straight away rather than waiting up to a minute for the timer.
+				StartCPDLCPoll();
+				menuState.lastCPDLCPoll = clock();
+			}
+			else {
+				// Re-arm the peek for the next logon. Upstream sets firstPeek false after
+				// the first fetch and never sets it back, so a logoff and logon in the same
+				// session went straight to poll - which consumes messages, and skips the
+				// leading Hoppie message id that parseDLMessage only reads in peek mode.
+				CPDLCMessage::firstPeek = true;
+			}
+		}
+
 		if (!strcmp(sObjectId, "Close Setup")) {
 			menuState.setup = false;
+		}
+	}
+
+	if (ObjectType == BUTTON_MENU_CPDLC) {
+		if (!strcmp(sObjectId, "cpdlcICAO")) {
+			GetPlugIn()->OpenPopupEdit(Area, FUNCTION_CPDLC_ICAO, CPDLCMessage::hoppieICAO.c_str());
 		}
 	}
 
@@ -3303,6 +3344,12 @@ void CSiTRadar::OnFunctionCall(int FunctionId,
 			altFilterHigh = stoi(sItemString);
 		}
 		catch (...) {}
+	}
+
+	if (FunctionId == FUNCTION_CPDLC_ICAO) {
+		string ICAO = sItemString;
+		std::transform(ICAO.begin(), ICAO.end(), ICAO.begin(), ::toupper);
+		CPDLCMessage::hoppieICAO = ICAO.substr(0, 4);
 	}
 
 	if (FunctionId >= FUNCTION_DEST_ICAO_1 && FunctionId <= FUNCTION_DEST_ICAO_5) {
