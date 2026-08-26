@@ -23,6 +23,8 @@ const COLORREF C_MENU_GREEN = RGB(0, 135, 0);
 const COLORREF C_PTL_GREEN = RGB(3, 102, 0);
 const COLORREF C_WX_BLUE = RGB(0, 32, 120);
 const COLORREF C_PPS_TBS_PINK = RGB(244, 186, 255);
+const COLORREF C_CPDLC_GREEN = RGB(0, 200, 0);
+const COLORREF C_CPDLC_BLUE = RGB(14, 215, 215);
 
 // Math
 // Was 3.14159. Six significant figures is enough for the tag connector angles it is
@@ -43,6 +45,8 @@ const int AIRCRAFT_CJS = 400;
 const int TAG_ITEM_FP_CS = 401;
 const int TAG_ITEM_FP_FINAL_ALTITUDE = 402;
 const int TAG_ALT = 403;
+const int TAG_CPDLC = 404;
+const int TAG_CPDLC_MNEMONIC = 405;
 
 const int BUTTON_MENU = 201;
 const int BUTTON_MENU_HALO_OPTIONS = 202;
@@ -115,6 +119,8 @@ const int FUNCTION_RMB_POPUP = 309;
 
 const int FUNCTION_TBS_HDG = 310;
 const int TBS_FOLLOWER_TOGGLE = 311;
+const int BUTTON_MENU_CPDLC = 312;
+const int FUNCTION_CPDLC_ICAO = 313;
 
 // Radar Background
 const int SCREEN_BACKGROUND = 501;

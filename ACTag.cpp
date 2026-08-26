@@ -67,6 +67,46 @@ namespace {
 
 } // namespace
 
+std::string CACTag::CPDLCMnemonicFor(const CPDLCMessage& message)
+{
+	// Short form of the most recent message, for line 0 of the tag. Upstream computes this
+	// inline in the middle of DrawRTACTag; pulled out because it is pure string work with
+	// no drawing in it, and because it is the sort of thing worth testing later.
+	//
+	// substr(0, n) clamps rather than throwing when the message is shorter than n, so the
+	// prefix comparisons below are safe on short or empty content.
+	const std::string& text = message.rawMessageContent;
+
+	const size_t flPos = text.find("FL");
+	const bool hasLevel = (flPos != std::string::npos && text.length() >= flPos + 5);
+	const std::string level = hasLevel ? text.substr(flPos, 5) : "";
+
+	if (message.isdlMessage)
+	{
+		if (hasLevel)
+		{
+			if (text.substr(0, 13) == "REQUEST CLIMB") { return "RC " + level; }
+			if (text.substr(0, 15) == "REQUEST DESCEND") { return "RD " + level; }
+			if (text.substr(0, 10) == "REQUEST FL") { return "R " + level; }
+			if (text.substr(0, 21) == "REQUEST VOICE CONTACT") { return "R VOICE"; }
+		}
+
+		if (text == "WILCO") { return "WILCO"; }
+		if (text == "UNABLE") { return "UNABLE"; }
+
+		return "D/L";
+	}
+
+	if (hasLevel)
+	{
+		if (text.substr(0, 12) == "CLIMB TO AND") { return "CM " + level; }
+		if (text.substr(0, 14) == "DESCEND TO AND") { return "DM " + level; }
+		if (text.substr(0, 11) == "MAINTAIN FL") { return "M " + level; }
+	}
+
+	return "U/L";
+}
+
 void CACTag::InvalidateAirportCache()
 {
 	g_airportPositions.clear();
@@ -432,6 +472,35 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		if (blinking && CSiTRadar::halfSecTick)
 		{
 			dc->SetTextColor(C_WHITE);
+		}
+
+		// Line 0 - CPDLC mnemonic, above the callsign. Nothing else draws here on an alpha
+		// tag, so this displaces nothing. Blue for a downlink awaiting a controller,
+		// green for the last uplink sent.
+		if (CSiTRadar::mAcData[rt->GetCallsign()].cpdlcMnemonic
+			&& !CSiTRadar::mAcData[rt->GetCallsign()].CPDLCMessages.empty())
+		{
+			const CPDLCMessage& latest = CSiTRadar::mAcData[rt->GetCallsign()].CPDLCMessages.back();
+			const string mnemonic = CACTag::CPDLCMnemonicFor(latest);
+
+			if (!mnemonic.empty())
+			{
+				int sDCMnemonic = dc->SaveDC();
+
+				dc->SelectObject(CFontHelper::Euroscope14);
+				dc->SetTextColor(latest.isdlMessage ? C_CPDLC_BLUE : C_CPDLC_GREEN);
+
+				RECT rline0;
+				rline0.top = line0.y;
+				rline0.left = line0.x;
+				rline0.bottom = line1.y;
+
+				dc->DrawText(mnemonic.c_str(), &rline0, DT_LEFT | DT_CALCRECT);
+				dc->DrawText(mnemonic.c_str(), &rline0, DT_LEFT);
+				rad->AddScreenObject(TAG_CPDLC_MNEMONIC, rt->GetCallsign(), rline0, true, "CPDLC Mnemonic");
+
+				dc->RestoreDC(sDCMnemonic);
+			}
 		}
 
 		// Line 1
