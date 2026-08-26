@@ -809,8 +809,9 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 						// 1 and 2 are the EuroScope conventions for cleared for approach.
 						if (clearedAltitude == 1 || clearedAltitude == 2) {
 
+							const string tbsDestination = tbsFp.GetFlightPlanData().GetDestination();
 							const SituTbs::Airport* tbsAirport =
-								SituTbs::FindAirport(tbsConfig, tbsFp.GetFlightPlanData().GetDestination());
+								SituTbs::FindAirport(tbsConfig, tbsDestination);
 
 							const double distanceToDest = tbsFp.GetDistanceToDestination();
 
@@ -819,19 +820,42 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 								&& distanceToDest > tbsConfig.gate.minDistanceNm
 								&& radarTarget.GetPosition().GetPressureAltitude() > tbsConfig.gate.minAltitudeFt) {
 
-								// ES reports track in true and the runway heading is set
-								// in magnetic, so the variation reconciles them.
-								// Normalised to -180..180 so a heading either side of
-								// north is still a small difference: the raw subtraction
-								// reads 358 against 5 as 363 rather than -7, and TBS
-								// would silently refuse to engage on a runway near north.
-								double headingDelta = radarTarget.GetTrackHeading()
-									- menuState.tbsHdg + tbsAirport->magneticVariation;
-								headingDelta = fmod(headingDelta + 180.0, 360.0);
-								if (headingDelta < 0) { headingDelta += 360.0; }
-								headingDelta -= 180.0;
+								// Which runway the aircraft is established on. The course
+								// comes from the runway's own thresholds, so it is true
+								// already and the track can be compared to it directly -
+								// this is what removed the hardcoded magnetic variation.
+								//
+								// A course typed into the menu narrows it to one runway
+								// when several are active. That comparison is against the
+								// designator, which is magnetic like the typed value, so
+								// it needs no conversion either.
+								double approachCourse = -1.0;
 
-								if (fabs(headingDelta) < tbsConfig.gate.headingToleranceDeg) {
+								for (const ActiveArrivalRunway& arrival : menuState.activeArrivalRunways) {
+									if (arrival.airport != tbsDestination) { continue; }
+
+									if (menuState.tbsHdg != 0) {
+										int designatorDelta = (arrival.magneticDesignator - menuState.tbsHdg + 540) % 360 - 180;
+										if (abs(designatorDelta) > 15) { continue; }
+									}
+
+									// Normalised to -180..180 so a track either side of
+									// north is still a small difference: the raw
+									// subtraction reads 358 against 5 as 363 rather than
+									// -7, and TBS would silently refuse to engage on a
+									// runway pointing near north.
+									double headingDelta = radarTarget.GetTrackHeading() - arrival.trueCourse;
+									headingDelta = fmod(headingDelta + 180.0, 360.0);
+									if (headingDelta < 0) { headingDelta += 360.0; }
+									headingDelta -= 180.0;
+
+									if (fabs(headingDelta) < tbsConfig.gate.headingToleranceDeg) {
+										approachCourse = arrival.trueCourse;
+										break;
+									}
+								}
+
+								if (approachCourse >= 0.0) {
 
 									double tbsDist = 0;
 									const bool haveSeparation = SituTbs::SeparationFor(
@@ -844,7 +868,7 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 									if (haveSeparation) {
 										POINT followerP = HaloTool::drawTBS(&dc, radarTarget, this, p, tbsDist, pixnm,
-											(double)menuState.tbsHdg - tbsAirport->magneticVariation);
+											approachCourse);
 
 										// draw letter to allow toggling of follower
 										dc.SelectObject(CFontHelper::Euroscope14);
@@ -3349,6 +3373,7 @@ void CSiTRadar::updateActiveRunways(int i) {
 	CSiTRadar::menuState.activeArpt.clear();
 	menuState.activeRunwaysList.clear();
 	menuState.activeRunways.clear();
+	menuState.activeArrivalRunways.clear();
 	// menuState.inactiveRwyList.clear();   // see the disabled scan below
 	// Active runway highlighting for ground screens
 	for (CSectorElement runway = m_pRadScr->GetPlugIn()->SectorFileElementSelectFirst(SECTOR_ELEMENT_RUNWAY); runway.IsValid();
@@ -3363,6 +3388,29 @@ void CSiTRadar::updateActiveRunways(int i) {
 			string airportrwy = airport + runway.GetRunwayName(0);
 			activerwys.push_back(airportrwy);
 
+			// Record each end that is active for arrivals, with the course an aircraft
+			// landing on it flies. The course is the bearing from this threshold to the
+			// far one, which is a true bearing by construction - no magnetic variation
+			// is involved anywhere, which is what let the hardcoded 10 for Toronto go.
+			for (int end = 0; end <= 1; end++) {
+				if (!runway.IsElementActive(false, end)) { continue; }
+
+				CPosition here, there;
+				runway.GetPosition(&here, end);
+				runway.GetPosition(&there, 1 - end);
+
+				ActiveArrivalRunway arrival;
+				arrival.airport = airport.substr(0, 4);
+				arrival.name = runway.GetRunwayName(end);
+				arrival.trueCourse = HaloTool::bearingBetween(here, there);
+
+				// "05" is 050 magnetic, "23" is 230. Runway designators carry the
+				// magnetic course by definition, so a typed course can be matched
+				// against them without converting either side.
+				arrival.magneticDesignator = atoi(arrival.name.c_str()) * 10;
+
+				menuState.activeArrivalRunways.push_back(arrival);
+			}
 		}
 	}
 

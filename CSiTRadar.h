@@ -150,6 +150,10 @@ struct buttonStates {
     vector<CSectorElement> activeRunways;
     vector<CSectorElement> activeRunwaysList;
     vector<inactiveRunway> inactiveRwyList;
+
+    // Rebuilt by updateActiveRunways. TBS takes its approach course from here rather
+    // than from a typed heading and a hardcoded magnetic variation.
+    vector<ActiveArrivalRunway> activeArrivalRunways;
     map<string, string> arptAltimeterOld;
     map<string, string> arptAtisLetterOld;
 
