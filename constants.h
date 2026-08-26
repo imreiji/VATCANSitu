@@ -135,6 +135,10 @@ const int LIST_MESSAGES = 8002;
 
 const int LIST_ITEM_SIMPLE_STRING = 8100;
 
+// How much of a list must stay inside the radar area to remain draggable.
+const int LIST_MIN_VISIBLE_WIDTH = 60;
+const int LIST_MIN_VISIBLE_HEIGHT = 20;
+
 // Module 2 : distances relative to module origin
 const int HALO_TOOL_X = 0;
 const int HALO_TOOL_Y = 0;

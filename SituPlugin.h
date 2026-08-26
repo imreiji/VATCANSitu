@@ -4,7 +4,20 @@
 #include <string>
 
 struct ACList {
-    POINT p{ 0, 0 };
+    // Offset from the top left of the radar area, not an absolute screen position. The
+    // header strip is anchored the same way - it is drawn from CPoint(radarea.left,
+    // radarea.top) with everything inside it at a fixed offset - so a list keeps its
+    // place relative to the header when the radar area moves or the window is resized.
+    //
+    // Stored absolutely before, which meant a list saved on a large monitor could sit
+    // outside a smaller one entirely, with no way to drag it back.
+    POINT offset{ 0, 0 };
+
+    // Set when the position came from a settings file written before the change above.
+    // The conversion needs the radar area, which is not known while the settings are
+    // being read, so it happens on the first draw. See ResolveListOffsets.
+    bool offsetIsAbsolute{ false };
+
     int listType{ 0 };
     bool collapsed{ false };
 };

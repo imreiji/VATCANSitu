@@ -454,6 +454,13 @@ protected:
     void ButtonToScreen(CSiTRadar* radscr, const RECT& rect, const string& btext, int itemtype);
     void DrawACList(POINT p, CDC* dc, unordered_map<string, ACData>& ac, int listType);
 
+    // List positions are stored as offsets from the radar area origin - the same anchor
+    // the header strip uses - so they travel with it rather than sitting at a fixed
+    // screen coordinate. See the comment on ACList.
+    static POINT ListOrigin(const ACList& list, const RECT& radarea);
+    static void ClampListOffset(ACList& list, const RECT& radarea);
+    static void ResolveListOffsets(const RECT& radarea);
+
     // helper functions
     clock_t time = clock();
     clock_t oldTime = clock();
