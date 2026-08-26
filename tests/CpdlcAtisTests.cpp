@@ -108,7 +108,7 @@ int main()
     //     single right answer and a wrong next data authority fails at the far end.
     {
         ++g_checks;
-        const auto d = SituCpdlcAtis::Parse({"CPDLC ABCD or EFGH depending on sector"});
+        const auto d = SituCpdlcAtis::Parse({"CPDLC CZQM or CZQX depending on sector"});
         if (!d.mentionsDatalink || !d.station.empty())
         {
             ++g_failures;
@@ -128,9 +128,12 @@ int main()
     }
 
     // --- The same code repeated on one line is not ambiguity. Taken verbatim from
-    //     LFPG_N_GND, where counting occurrences rather than distinct values threw the
-    //     answer away.
+    //     LFPG_N_GND. It yields no station because the line names PDC and not CPDLC,
+    //     but the repeat must not be what stops it - so the same line with CPDLC on it
+    //     is checked too.
     CheckDeclares({"TOBT @ cdm.vatsim.fr | PDC LFPG | Charts chartfox.org/LFPG"},
+                  "", "a PDC only line yields no CPDLC station");
+    CheckDeclares({"TOBT @ cdm.vatsim.fr | CPDLC LFPG | Charts chartfox.org/LFPG"},
                   "LFPG", "the same code twice on one line still resolves");
 
     // --- CPDLC is distinguished from PDC and DCL. A tower delivering clearances is
@@ -149,10 +152,10 @@ int main()
     {
         ++g_checks;
         const auto d = SituCpdlcAtis::Parse({"\"Dubai Arrivals\" - DCL [OMDA] - Solo Endorsement"});
-        if (d.mentionsCpdlc || d.station != "OMDA")
+        if (d.mentionsCpdlc || !d.station.empty())
         {
             ++g_failures;
-            std::cout << "FAIL: OMDB_APP DCL line - expected OMDA and no CPDLC flag, got \""
+            std::cout << "FAIL: OMDB_APP DCL line - expected no station and no CPDLC flag, got \""
                       << d.station << "\"\n";
         }
     }
@@ -169,6 +172,45 @@ int main()
     // --- A four character token elsewhere in an info block must not be picked up when
     //     datalink is never mentioned.
     CheckSilent({"Position CZQM staffed until 0200z"}, "a station-shaped token, no datalink word");
+
+    // --- Only centre and flight service positions are read at all. A tower is never a
+    //     next data authority however it advertises itself.
+    {
+        ++g_checks;
+        const bool ok = SituCpdlcAtis::IsEnRoutePosition("CZQM_CTR")
+                     && SituCpdlcAtis::IsEnRoutePosition("CZQM_2_CTR")
+                     && SituCpdlcAtis::IsEnRoutePosition("CZQX_FSS")
+                     && !SituCpdlcAtis::IsEnRoutePosition("EDDH_TWR")
+                     && !SituCpdlcAtis::IsEnRoutePosition("ZSPD_DEL")
+                     && !SituCpdlcAtis::IsEnRoutePosition("LFPG_N_GND")
+                     && !SituCpdlcAtis::IsEnRoutePosition("OERK_ATIS")
+                     && !SituCpdlcAtis::IsEnRoutePosition("OMDB_APP")
+                     && !SituCpdlcAtis::IsEnRoutePosition("")
+                     && !SituCpdlcAtis::IsEnRoutePosition("CTR");
+        if (!ok) { ++g_failures; std::cout << "FAIL: en route position filter\n"; }
+    }
+
+    // --- A code advertised beside PDC or DCL alone is a departure clearance address,
+    //     not an en route station. Both of these are real lines.
+    CheckDeclares({"Pudong Delivery | DCL [ZSPD]"}, "", "DCL only, bracketed");
+    CheckDeclares({"Callsign HAMBURG TOWER - PDC/DCL Logon EDDH"}, "", "PDC and DCL only, after LOGON");
+
+    // --- But a line naming CPDLC alongside PDC still counts, because it names CPDLC.
+    CheckDeclares({"Callsign BREMEN RADAR - CPDLC/PDC on EDWK (CPDLC above FL285 only!)"},
+                  "EDWK", "CPDLC and PDC together");
+
+    // --- Placeholders are not stations.
+    {
+        ++g_checks;
+        const char* const placeholders[] = { "XXXX", "ZZZZ", "0000", "AAAA", "NONE", "ABCD", "1234", "TEST" };
+        bool ok = true;
+        for (const char* p : placeholders)
+        {
+            const auto d = SituCpdlcAtis::Parse({ std::string("CPDLC LOGON ") + p });
+            if (!d.station.empty()) { ok = false; std::cout << "   accepted placeholder " << p << "\n"; }
+        }
+        if (!ok) { ++g_failures; std::cout << "FAIL: a placeholder was read as a station\n"; }
+    }
 
     // --- The policy: silence means do not offer, and PDC or DCL alone is not enough.
     {

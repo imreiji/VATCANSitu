@@ -65,6 +65,18 @@ namespace SituCpdlcAtis
         std::string station;
     };
 
+    // Only centre and flight service positions hold en route datalink authority. A
+    // tower, ground, delivery or ATIS station is never a next data authority however it
+    // advertises itself, so its info block is not worth reading for this purpose - and
+    // reading it is how a departure clearance code gets mistaken for a CPDLC station.
+    inline bool IsEnRoutePosition(const std::string& callsign)
+    {
+        const size_t length = callsign.size();
+        if (length >= 4 && callsign.compare(length - 4, 4, "_CTR") == 0) { return true; }
+        if (length >= 4 && callsign.compare(length - 4, 4, "_FSS") == 0) { return true; }
+        return false;
+    }
+
     // The policy, in one named place rather than spread across call sites: offer CPDLC
     // only where the controller has said they have it. PDC and DCL deliberately do not
     // count - a tower delivering departure clearances is not an en route authority.
@@ -100,11 +112,22 @@ namespace SituCpdlcAtis
         if (token.size() != 4) { return false; }
         for (char c : token) { if (!IsCodeChar(c)) { return false; } }
 
+        // Four identical characters is a placeholder, not a station - XXXX, ZZZZ, 0000
+        // and friends are what people write when they mean "fill this in".
+        bool allSame = true;
+        for (size_t i = 1; i < token.size(); ++i)
+        {
+            if (token[i] != token[0]) { allSame = false; break; }
+        }
+        if (allSame) { return false; }
+
         // Words of exactly four characters that turn up next to a datalink mention and
-        // are never a station.
+        // are never a station, including the other common ways of writing a blank.
         static const char* const kNotStations[] = {
             "ONLY", "ABLE", "WITH", "FROM", "THIS", "PLEA", "VOIC", "DATA", "LINK",
-            "USED", "FREE", "TEXT", "ATIS", "INFO", "NOTE", "SEE"
+            "USED", "FREE", "TEXT", "ATIS", "INFO", "NOTE", "SEE",
+            "NONE", "NIL0", "TBAD", "ICAO", "CODE", "HERE", "SOON", "WHEN", "ASK0",
+            "TEST", "DEMO", "XXX1", "ABCD", "1234"
         };
         for (const char* word : kNotStations)
         {
@@ -155,6 +178,13 @@ namespace SituCpdlcAtis
 
             result.mentionsDatalink = true;
             if (hasCpdlc) { result.mentionsCpdlc = true; }
+
+            // Only a line that names CPDLC can supply a CPDLC station. A code advertised
+            // beside PDC or DCL alone is a departure clearance address, which is a
+            // different service reached at a different code - "DCL [ZSPD]" and
+            // "DCL [OMDA]" are both real, and neither is where an en route uplink goes.
+            // A line saying "CPDLC/PDC on EDWK" does name CPDLC, so it still counts.
+            if (!hasCpdlc) { continue; }
             if (!result.station.empty()) { continue; }
 
             // 1. Bracketed, the clearest form.
