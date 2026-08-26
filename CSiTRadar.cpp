@@ -491,18 +491,44 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 										radarTarget.Uncorrelate();
 										mAcData[callSign].multipleDiscrete = true;
 
-										//to-do add message to message list:
-
-
+										// Reported by the message list, which reads this
+										// flag back out of mAcData in DrawACList.
 									}
 								}
 							}
 						}
 					}
-					if (radarTarget.GetPosition().GetRadarFlags() < 2) {
-						if (radarTarget.GetPosition().GetRadarFlags() == 0 || !mAcData[radarTarget.GetCallsign()].manualCorr) {
-							radarTarget.Uncorrelate();
-						}
+					// A target without SSR must not carry a flight plan association: a primary
+					// return is an unknown until a controller says otherwise, which is the
+					// symbology this plugin exists to reproduce.
+					//
+					// This used to call Uncorrelate() on every refresh, guarded by a
+					// manualCorr flag that nothing ever set to true. The guard was therefore
+					// dead and the call unconditional. That mattered, because the SDK
+					// documents Uncorrelate as "after uncorrelating the FP will not be
+					// correlated automatically by the system" - so once the association is
+					// broken EuroScope never restores it, and every later call had nothing
+					// left to undo except a correlation the controller had just made by
+					// hand. Manually correlating a primary target was impossible: the plugin
+					// took it apart again within a frame.
+					//
+					// Break the automatic association once and then leave the target alone.
+					// The flag is reset when the target regains SSR, so a code appearing and
+					// disappearing re-arms it.
+					const int radarFlags = radarTarget.GetPosition().GetRadarFlags();
+
+					if (radarFlags >= 2) {
+						mAcData[callSign].autoCorrelationCleared = false;
+					}
+					else if (radarFlags == 0) {
+						// No radar at all. Never allow an association to stand, which is
+						// what the original radarFlags == 0 clause said.
+						radarTarget.Uncorrelate();
+						mAcData[callSign].autoCorrelationCleared = false;
+					}
+					else if (!mAcData[callSign].autoCorrelationCleared) {
+						radarTarget.Uncorrelate();
+						mAcData[callSign].autoCorrelationCleared = true;
 					}
 
 					// altitude filtering 
