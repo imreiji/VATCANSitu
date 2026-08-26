@@ -112,13 +112,15 @@ CSiTRadar::CSiTRadar()
 
 #pragma region intializeLists
 	//initialize lists
+	// Defaults are offsets from the top left of the radar area, not screen coordinates.
+	// The y values clear the 60 pixel header strip.
 	ACList atisList, offScreenList, messageList;
 	atisList.listType = LIST_TIME_ATIS;
-	atisList.p = { 500,84 }; // Default Location
-	offScreenList.p = { 0,500 }; // Default Location
+	atisList.offset = { 500, 84 };
 	offScreenList.listType = LIST_OFF_SCREEN;
+	offScreenList.offset = { 0, 500 };
 	messageList.listType = LIST_MESSAGES;
-	messageList.p = { 800,84 }; // Default Location
+	messageList.offset = { 800, 84 };
 	acLists[LIST_TIME_ATIS] = atisList;
 	acLists[LIST_OFF_SCREEN] = offScreenList;
 	acLists[LIST_MESSAGES] = messageList;
