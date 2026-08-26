@@ -1463,11 +1463,14 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 					if (menuLayer == 0) {
 
 						// screen range, dummy buttons, not really necessary in ES.
+						// Drawn but not registered, same as the Zoom and Pan buttons beside
+						// it: on the real display Relocate re-centres the scope, which in
+						// EuroScope the mouse and the ASR already do. It was registered
+						// once, with the id string "Alt Filt Opts" left over from a paste,
+						// and no handler was ever written - so it was a click target that
+						// did nothing. Re-register it here if the behaviour is ever wanted.
 						but = TopMenu::DrawButton(&dc, menutopleft, 70, 23, "Relocate", autoRefresh);
-						// Registered as "Alt Filt Opts" from a paste. There is no handler for
-						// BUTTON_MENU_RELOCATE, so clicking does nothing either way, but the
-						// wrong id would mislead whoever adds one.
-						ButtonToScreen(this, but, "Relocate", BUTTON_MENU_RELOCATE);
+						// ButtonToScreen(this, but, "Relocate", BUTTON_MENU_RELOCATE);
 						menutopleft.y += 25;
 
 						TopMenu::DrawButton(&dc, menutopleft, 35, 23, "Zoom", 0);
@@ -2050,6 +2053,9 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 				}
 			}
 
+			// Closed-runway markers on IFR display types: a red line along each inactive
+			// runway with a 0.1nm circle at its midpoint. Disabled, together with the scan
+			// in updateActiveRunways that fills inactiveRwyList. Re-enable both together.
 			/*
 
 			Pen pen(Color(255, 199, 48, 35), 1);
@@ -3368,7 +3374,7 @@ void CSiTRadar::updateActiveRunways(int i) {
 	CSiTRadar::menuState.activeArpt.clear();
 	menuState.activeRunwaysList.clear();
 	menuState.activeRunways.clear();
-	menuState.inactiveRwyList.clear();
+	// menuState.inactiveRwyList.clear();   // see the disabled scan below
 	// Active runway highlighting for ground screens
 	for (CSectorElement runway = m_pRadScr->GetPlugIn()->SectorFileElementSelectFirst(SECTOR_ELEMENT_RUNWAY); runway.IsValid();
 		runway = m_pRadScr->GetPlugIn()->SectorFileElementSelectNext(runway, SECTOR_ELEMENT_RUNWAY)) {
@@ -3385,6 +3391,12 @@ void CSiTRadar::updateActiveRunways(int i) {
 		}
 	}
 
+	// Collects the runways at an in-use airport that are themselves not in use, for the
+	// red closed-runway markers drawn on IFR display types. Disabled together with that
+	// drawing block in OnRefresh: the markers were never enabled, so this was a second
+	// full pass over every runway in the sector file building a list nothing read.
+	// Re-enable both together, or neither.
+	/*
 	for (CSectorElement runway = m_pRadScr->GetPlugIn()->SectorFileElementSelectFirst(SECTOR_ELEMENT_RUNWAY); runway.IsValid();
 		runway = m_pRadScr->GetPlugIn()->SectorFileElementSelectNext(runway, SECTOR_ELEMENT_RUNWAY)) {
 		string airportrwy;
@@ -3408,6 +3420,7 @@ void CSiTRadar::updateActiveRunways(int i) {
 			}
 		}
 	}
+	*/
 
 	
 
