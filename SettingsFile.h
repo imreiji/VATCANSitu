@@ -193,6 +193,20 @@ namespace SituSettings
         return local;
     }
 
+    // Fills anything the local file left empty from another source - in practice the
+    // credential recovered while migrating settings.json.
+    //
+    // This exists because doing it the obvious way lost people's logon codes. The
+    // migration filled a LocalSettings, and the read of SituLocal.txt then replaced it
+    // wholesale; anyone who had copied in a blank SituLocal.txt alongside their existing
+    // settings.json ended up with no credential and a "no logon code" error from Hoppie.
+    // An empty field in a file is an absence, not an instruction to forget.
+    inline void FillEmptyFrom(LocalSettings& into, const LocalSettings& fallback)
+    {
+        if (into.hoppieCode.empty()) { into.hoppieCode = fallback.hoppieCode; }
+        if (into.hoppieICAO.empty()) { into.hoppieICAO = fallback.hoppieICAO; }
+    }
+
     inline std::string Serialize(const Settings& settings)
     {
         std::string out;
