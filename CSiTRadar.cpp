@@ -162,7 +162,9 @@ CSiTRadar::CSiTRadar()
 		{
 			const std::string cpdlcPath = wxRadar::getSituWxDir() + "SituCPDLC.txt";
 			if (SituFiles::Exists(cpdlcPath)) {
-				cpdlcStations = SituCpdlcStations::Parse(SituConfig::Parse(SituFiles::Read(cpdlcPath)));
+				const SituConfig::ParseResult cpdlcParsed = SituConfig::Parse(SituFiles::Read(cpdlcPath));
+				cpdlcStations = SituCpdlcStations::Parse(cpdlcParsed);
+				CPDLCMessage::dclTable = SituCpdlcDcl::Parse(cpdlcParsed);
 
 				if (!cpdlcStations.skippedLines.empty()) {
 					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",

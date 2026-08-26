@@ -2,6 +2,7 @@
 
 #include "HttpClient.h"
 #include "UrlEncode.h"
+#include "CpdlcDcl.h"
 #include <EuroScopePlugIn.h>
 #include <string>
 #include <sstream>
@@ -25,6 +26,11 @@ public:
 	// distributor holding one Hoppie connection for a whole sector, rather than every
 	// controller holding their own. TopSky exposes the same seam as CPDLC_Server.
 	static std::string cpdlcServer;
+
+	// Departure clearance templates, read once from the [DCL] section of
+	// SituCPDLC.txt. Static because the screens share one copy and it never changes
+	// at run time.
+	static SituCpdlcDcl::Table dclTable;
 	static unsigned int CPDLCMessage::ids;
 	static bool firstPeek; //
 
