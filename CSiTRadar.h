@@ -21,6 +21,11 @@
 #include "CPopUpMenu.h"
 #include "CAppWindows.h"
 #include "TbsConfig.h"
+#include "CpdlcStations.h"
+#include "CpdlcFreetext.h"
+#include "SettingsFile.h"
+#include "SituFiles.h"
+#include "SituLegacy.h"
 #include "HaloTool.h"
 #include "constants.h"
 #include "TopMenu.h"
@@ -223,6 +228,12 @@ public:
     // Read once from SituTBS.txt at load. Static because the screens share it and
     // it never changes at run time.
     static SituTbs::Config tbsConfig;
+
+    // CPDLC station table, read once from SituCPDLC.txt.
+    static SituCpdlcStations::Table cpdlcStations;
+
+    // Canned replies and standing messages, read once from SituCPDLC.txt.
+    static SituCpdlcFreetext::Table cpdlcFreetext;
 
     static unordered_map<string, bool> acADSB;
     static unordered_map<string, bool> acRVSM;
@@ -466,6 +477,26 @@ protected:
     static POINT ListOrigin(const ACList& list, const RECT& radarea);
     static void ClampListOffset(ACList& list, const RECT& radarea);
     static void ResolveListOffsets(const RECT& radarea);
+
+    // Composes and sends one manual CPDLC uplink from the callsign menu.
+    void SendCPDLCUplink(const std::string& which);
+
+    // Sends one composed uplink on a worker and records it against the aircraft. The
+    // network call is an HTTP round trip and does not belong on the thread that draws.
+    void DispatchCPDLCUplink(CPDLCMessage uplink, const std::string& callsign);
+
+    // A blank uplink addressed to an aircraft, with the identifier already allocated.
+    CPDLCMessage NewCPDLCUplink(const std::string& callsign);
+
+    // The most recent downlink from this aircraft that asked for an answer and has not
+    // had one. Null when there is nothing outstanding.
+    CPDLCMessage* LatestOpenDownlink(const std::string& callsign);
+
+    void AcceptCPDLCLogon(const std::string& callsign);
+    void EndCPDLCService(const std::string& callsign);
+    void SendCPDLCFreetext(const std::string& callsign, const std::string& label);
+    void CloseCPDLCEditor(const std::string& callsign);
+    void OpenCPDLCEditor(const std::string& callsign, POINT at);
 
     // helper functions
     clock_t time = clock();

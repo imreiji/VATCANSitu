@@ -21,7 +21,60 @@
 //   first underscore, so CZQM_2_CTR falls back to the Moncton entry. Without this a
 //   split nobody anticipated resolves to nothing at all.
 
+// The uplink that tells an aircraft where to log on next. <station> is the four
+// character Hoppie login of the next controller, resolved from [STATIONS] below;
+// <radio> is that unit's RTF callsign.
+//
+// Which verb this network's clients actually act on is not settled. Hoppie's own
+// encoding notes document HANDOVER; the real FANS element is NEXT DATA AUTHORITY, which
+// is what VATCANSitu has always sent; TopSky's binary carries both strings and its
+// controller manual documents neither, describing only REQUEST LOGON from the aircraft
+// and Start CPDLC from the controller. Nobody here can settle it from the outside, so it
+// is a line in a file: if pilots do not act on one, try the other.
+CPDLC_HandoverTemplate=NEXT DATA AUTHORITY @<station>@
+
 CPDLC_FSM_CLD_Header=<hour><min> <year2><month2><day> <adep> PDC <number> @<callsign>@
+
+[DCL]
+// DCL:<adep>:<subtype>:<message type>:<response>:<text>
+//
+//   <adep>          comma separated departure ICAOs, or * for any
+//   <subtype>       a name the plugin asks for, or * for any
+//   <message type>  cpdlc or telex
+//   <response>      WU, AN, R, NE, or empty
+//   <text>          the clearance, with the placeholders listed below
+//
+// First match wins, so a row for one airport must come before the wildcard that would
+// also match it. The text is everything after the fifth colon, so a colon inside a
+// clearance is safe.
+//
+// Placeholders:
+//   <adep> <ades>       departure and destination
+//   <callsign>          aircraft callsign
+//   <number> <letter>   the PDC identifier, three digits and a letter
+//   <drwy> <sid>        departure runway and SID
+//   <assr>              assigned squawk
+//   <atis>              current ATIS letter
+//   <uname> <freq>      the clearing controller and their frequency
+//   <time> <date>       zulu HHMM, and YYMMDD
+//   <actype> <cfl>      filed aircraft type and cruise level
+//   <rte>               filed route, truncated at a waypoint boundary
+//
+// These three were compiled into the plugin, selected by comparing the origin against
+// CYTZ and CYUL. They differ by one field, and cost about forty five lines of appending
+// to say so.
+
+// Acknowledgement sent when a request is received, and the rejection when no flight
+// plan is held.
+DCL:*:FSM:cpdlc:NE:FSM <time> <date> <adep>RCD RECEIVED @REQUEST BEING PROCESSED @STANDBY
+DCL:*:FSMREJECT:cpdlc:NE:RCD REJECTED @FLIGHT PLAN NOT HELD @REVERT TO VOICE PROCEDURES
+
+// ARINC 623 clearances.
+DCL:CYTZ:*:cpdlc:WU:<adep> PDC <number> <callsign> CLRD TO <ades> OFF <drwy> VIA <sid> SQUAWK <assr> ATIS <atis> CONTACT <uname> ON FREQ <freq>
+DCL:CYUL:*:cpdlc:WU:<adep> PDC <number> <callsign> CLRD TO <ades> OFF <drwy> VIA <sid> SQUAWK <assr> NEXT FREQ <freq> ATIS <atis>
+
+// Everywhere else: the long form, as a telex.
+DCL:*:*:telex:NE:TIMESTAMP <time> *PRE-DEPARTURE CLEARANCE* FLT <callsign> <adep> <actype> FILED <cfl> XPRD <assr> USE SID <sid> DEPARTURE RUNWAY <drwy> DESTINATION <ades> *** ADVISE ATC IF RUNUP REQUIRED *** CONTACT ATC WITH IDENTIFIER <number><letter> <rte> END
 
 [FREETEXT]
 FREETEXT:UNICOM:SERVICES TERMINATED - MNT UNICOM 122.8

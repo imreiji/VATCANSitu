@@ -1,9 +1,13 @@
 #include "pch.h"
 #include "cpdlc.h"
+#include "CpdlcPacket.h"
+#include "CpdlcDcl.h"
 
 unsigned int CPDLCMessage::ids = 0;
 std::string CPDLCMessage::hoppieCode = "";
 std::string CPDLCMessage::hoppieICAO = "";
+std::string CPDLCMessage::cpdlcServer = "https://www.hoppie.nl/acars/system/connect.html";
+SituCpdlcDcl::Table CPDLCMessage::dclTable;
 bool CPDLCMessage::firstPeek = true;
 
 std::string CPDLCMessage::YYMMDDString() {
@@ -151,30 +155,25 @@ CPDLCMessage CPDLCMessage::parseDLMessage(std::string& rawMessage) { // breaks u
 
 		if (parsedMessage.messageType == "cpdlc") {
 
-			std::stringstream ss(result);
-			std::string token;
-			std::vector<std::string> components;
+			// The message is the remainder after the fifth delimiter, not the sixth of
+			// six fields. Splitting on '/' and taking a component truncated any message
+			// that contained a slash - a frequency pair, an altitude block - and the
+			// pop_back() that followed then removed a real character, because the
+			// closing brace it assumed was on a later component. See CpdlcPacket.h.
+			const SituCpdlcPacket::Packet packet = SituCpdlcPacket::Parse(result);
 
-			// Split the string using '/'
-			while (std::getline(ss, token, '/')) {
-				components.push_back(token);
-			}
-
-			if (components.size() >= 6) {
-
+			if (packet.valid) {
 
 				// Both fields come straight off the network. stoi throws
 				// std::invalid_argument on anything non-numeric and std::out_of_range on
 				// anything too large, and this runs inside a EuroScope callback, where an
-				// escaping exception terminates the process. The original guarded only
-				// against an empty string, and the try/catch a few lines above wraps the
-				// getline splitting, which cannot realistically throw, rather than these.
+				// escaping exception unwinds through a module boundary.
 				try {
-					if (!components.at(2).empty()) {
-						parsedMessage.messageID = stoi(components.at(2));
+					if (!packet.minField.empty()) {
+						parsedMessage.messageID = stoi(packet.minField);
 					}
-					if (!components.at(3).empty()) {
-						parsedMessage.responseToMessageID = stoi(components.at(3));
+					if (!packet.mrnField.empty()) {
+						parsedMessage.responseToMessageID = stoi(packet.mrnField);
 					}
 				}
 				catch (const std::exception&) {
@@ -183,11 +182,10 @@ CPDLCMessage CPDLCMessage::parseDLMessage(std::string& rawMessage) { // breaks u
 					parsedMessage.rawMessageContent = "INVALID DOWNLINK MESSAGE";
 					return parsedMessage;
 				}
-				parsedMessage.responseRequired = components.at(4);
-				if (components.at(5).length() > 1) {
-					parsedMessage.rawMessageContent = components.at(5);
-					parsedMessage.rawMessageContent.pop_back();
-				}
+
+				parsedMessage.responseRequired = packet.responseAttribute;
+				parsedMessage.rawMessageContent = packet.message;
+
 				// All D/L messages open mnemonic -> parsed in the display part
 				parsedMessage.opensMnemonic = true;
 			}
@@ -208,7 +206,7 @@ std::string CPDLCMessage::PollCPDLCMessages() { // Returns raw string of CPDLC m
 	// readable by anything on the network path and recorded by any intermediary that logs
 	// request lines. The endpoint serves https with a valid certificate.
 	std::string url;
-	url = "https://www.hoppie.nl/acars/system/connect.html?logon=" + SituUrl::Encode(CPDLCMessage::hoppieCode)
+	url = CPDLCMessage::cpdlcServer + "?logon=" + SituUrl::Encode(CPDLCMessage::hoppieCode)
 		+ "&from=" + SituUrl::Encode(CPDLCMessage::hoppieICAO) + "&to=SERVER";
 
 	if (CPDLCMessage::firstPeek) {
@@ -228,7 +226,7 @@ std::string CPDLCMessage::PollCPDLCMessages() { // Returns raw string of CPDLC m
 void CPDLCMessage::SendCPDLCMessage() {
 
 	// https, and every value percent-encoded - see PollCPDLCMessages and SituUrl::Encode.
-	const std::string url = "https://www.hoppie.nl/acars/system/connect.html";
+	const std::string url = CPDLCMessage::cpdlcServer;
 
 	std::string postfields = "logon=";
 	postfields += SituUrl::Encode(this->hoppieCode);
@@ -320,159 +318,71 @@ std::string CPDLCMessage::MakePDCMessage(EuroScopePlugIn::CFlightPlan& flightpla
 		rteStr += "// FILED ROUTE";
 	}
 
-	if (subtype == "FSM") {
+	// Which clearance to send, and in what words, comes from the [DCL] rows in
+	// SituCPDLC.txt. This was three code branches selected by comparing the origin
+	// against "CYTZ" and "CYUL": they built the same string with one field's difference
+	// between them, and cost about forty five lines of appending to say so.
+	//
+	// The Montreal branch also had this in the middle of it:
+	//
+	//     rawMessageContent += GetOrigin();
+	//     rawMessageContent  = " PDC ";
+	//
+	// an assignment where every other line appends, so the origin was written and then
+	// thrown away and Montreal clearances went out without it. There is nowhere for that
+	// to hide in a template.
+	const std::string origin = flightplan.GetFlightPlanData().GetOrigin();
 
-		this->responseRequired = "NE";
-		this->messageType = "cpdlc";
+	// FSM and its rejection are selected by name; a clearance is selected by airport.
+	std::string wanted = subtype;
+	if (subtype == "FSM" && !flightplan.IsValid()) { wanted = "FSMREJECT"; }
 
-		if (flightplan.IsValid()) {
+	const SituCpdlcDcl::Rule* rule = SituCpdlcDcl::Select(dclTable, origin, wanted);
+	if (rule == nullptr) {
+		// No row covers this departure. Say so rather than sending an empty clearance -
+		// the shipped file ends with a wildcard row precisely so this cannot happen, and
+		// reaching here means someone removed it.
+		this->rawMessageContent = "NO DEPARTURE CLEARANCE TEMPLATE CONFIGURED";
+		this->messageType = "telex";
+		return "RCDRejected";
+	}
 
-			this->rawMessageContent = "FSM "; // Generate the PDC string;
-			this->rawMessageContent += ZuluTimeStringGen();
-			this->rawMessageContent += " ";
-			this->rawMessageContent += YYMMDDString();
-			this->rawMessageContent += " ";
-			this->rawMessageContent += flightplan.GetFlightPlanData().GetOrigin();
-			this->rawMessageContent += "RCD RECEIVED @REQUEST BEING PROCESSED @STANDBY";
-
-			return "CDAPending";
-		}
-		else {
-			this->rawMessageContent = "RCD REJECTED @FLIGHT PLAN NOT HELD @REVERT TO VOICE PROCEDURES";
-
-			return "RCDRejected";
-		}
-
+	std::string cruise;
+	if (flightplan.GetFlightPlanData().GetFinalAltitude() > 18000) {
+		cruise = "FL" + std::to_string(flightplan.GetFlightPlanData().GetFinalAltitude() / 100);
 	}
 	else {
-
-		//ARINC 623 Messages
-
-		if (flightplan.GetFlightPlanData().GetOrigin() == "CYTZ") {
-
-			this->responseRequired = "WU";
-			this->messageType = "cpdlc";
-			/*
-				this->rawMessageContent = "CLD "; // Generate the PDC string;
-				this->rawMessageContent += ZuluTimeStringGen();
-				this->rawMessageContent += " ";
-				this->rawMessageContent += YYMMDDString();
-				this->rawMessageContent += " ";
-			*/
-
-			this->rawMessageContent += flightplan.GetFlightPlanData().GetOrigin();
-			this->rawMessageContent += " PDC ";
-			this->rawMessageContent += std::to_string(pdcNumbers);
-			this->rawMessageContent += " ";
-			this->rawMessageContent += flightplan.GetCallsign();
-			this->rawMessageContent += " CLRD TO ";
-			this->rawMessageContent += flightplan.GetFlightPlanData().GetDestination();
-			this->rawMessageContent += " OFF ";
-			this->rawMessageContent += flightplan.GetFlightPlanData().GetDepartureRwy();
-			this->rawMessageContent += " VIA ";
-			this->rawMessageContent += flightplan.GetFlightPlanData().GetSidName();
-			this->rawMessageContent += " SQUAWK ";
-			this->rawMessageContent += flightplan.GetControllerAssignedData().GetSquawk();
-			this->rawMessageContent += " ATIS ";
-			this->rawMessageContent += atisLetter;
-			this->rawMessageContent += " CONTACT ";
-			this->rawMessageContent += controller.GetCallsign();
-			this->rawMessageContent += " ON FREQ ";
-			this->rawMessageContent += FreqTruncate(controller.GetPrimaryFrequency());
-
-			return "CDAPending";
-		}
-
-		else if (flightplan.GetFlightPlanData().GetOrigin() == "CYUL") {
-
-			this->responseRequired = "WU";
-			this->messageType = "cpdlc";
-
-			this->rawMessageContent += flightplan.GetFlightPlanData().GetOrigin();
-			this->rawMessageContent = " PDC "; // Generate the PDC string;
-			this->rawMessageContent += std::to_string(pdcNumbers);
-			this->rawMessageContent += " ";
-
-			this->rawMessageContent += flightplan.GetCallsign();
-			this->rawMessageContent += " CLRD TO ";
-			this->rawMessageContent += flightplan.GetFlightPlanData().GetDestination();
-			this->rawMessageContent += " OFF ";
-			this->rawMessageContent += flightplan.GetFlightPlanData().GetDepartureRwy();
-			this->rawMessageContent += " VIA ";
-			this->rawMessageContent += flightplan.GetFlightPlanData().GetSidName();
-			this->rawMessageContent += " SQUAWK ";
-			this->rawMessageContent += flightplan.GetControllerAssignedData().GetSquawk();
-			this->rawMessageContent += " NEXT FREQ ";
-			this->rawMessageContent += FreqTruncate(controller.GetPrimaryFrequency());
-			this->rawMessageContent += " ATIS ";
-			this->rawMessageContent += atisLetter;
-
-			return "CDAPending";
-
-		}
-
-		// ARINC 622 
-
-		// CPDLC only available in CYTZ and CYYZ in CZYZ if someone requests from elsewhere send
-		// ARINC 620/622 simulate a telex message
-		/* -// ATC PA01 YYZOWAC 22JUN/1003 C-FITW/733/AC7281
-
-			TIMESTAMP 22JUN21 10:03
-			*PRE-DEPARTURE CLEARANCE*
-			FLT ACA7281 CYYZ
-			H/B77W/W FILED FL360
-			XPRD 2264
-			USE SID AVSEP6
-			DEPARTURE RUNWAY 33R
-			DESTINATION CYVR
-			*** ADVISE ATC IF RUNUP REQUIRED ***
-			CONTACT CLEARANCE WITH IDENTIFIER 360M
-			AVSEP6 MUSIT SSM YQT GERTY
-			PEMPA AXILI BOOTH CANUC5
-			END
-
-			*/
-
-		else {
-
-			this->rawMessageContent = "TIMESTAMP ";
-			this->rawMessageContent += ZuluTimeStringGen();
-			this->rawMessageContent += " *PRE-DEPARTURE CLEARANCE* FLT ";
-			this->rawMessageContent += flightplan.GetCallsign();
-			this->rawMessageContent += " ";
-			this->rawMessageContent += flightplan.GetFlightPlanData().GetOrigin();
-			this->rawMessageContent += " ";
-			this->rawMessageContent += flightplan.GetFlightPlanData().GetAircraftFPType();
-			this->rawMessageContent += " FILED";
-			if (flightplan.GetFlightPlanData().GetFinalAltitude() > 18000) {
-				this->rawMessageContent += " FL";
-				this->rawMessageContent += std::to_string(flightplan.GetFlightPlanData().GetFinalAltitude() / 100);
-			}
-			else {
-				this->rawMessageContent += std::to_string(flightplan.GetFlightPlanData().GetFinalAltitude());
-			}
-			this->rawMessageContent += " XPRD ";
-			this->rawMessageContent += flightplan.GetControllerAssignedData().GetSquawk();
-			this->rawMessageContent += " USE SID ";
-			this->rawMessageContent += flightplan.GetFlightPlanData().GetSidName();
-			this->rawMessageContent += " DEPARTURE RUNWAY ";
-			this->rawMessageContent += flightplan.GetFlightPlanData().GetDepartureRwy();
-			this->rawMessageContent += " DESTINATION ";
-			this->rawMessageContent += flightplan.GetFlightPlanData().GetDestination();
-			this->rawMessageContent += " *** ADVISE ATC IF RUNUP REQUIRED *** ";
-			this->rawMessageContent += "CONTACT ATC WITH IDENTIFIER ";
-			this->rawMessageContent += std::to_string(pdcNumbers);
-			this->rawMessageContent += identifierLetter;
-			this->rawMessageContent += " ";
-			this->rawMessageContent += rteStr;
-			this->rawMessageContent += " END";
-
-			this->messageType = "telex";
-
-		}
-		std::string FPUI = std::to_string(pdcNumbers) + identifierLetter;
-		return FPUI;
+		cruise = std::to_string(flightplan.GetFlightPlanData().GetFinalAltitude());
 	}
+
+	const std::vector<SituCpdlcDcl::Field> fields = {
+		{ "adep", origin },
+		{ "ades", flightplan.GetFlightPlanData().GetDestination() },
+		{ "callsign", flightplan.GetCallsign() },
+		{ "number", std::to_string(pdcNumbers) },
+		{ "letter", identifierLetter },
+		{ "drwy", flightplan.GetFlightPlanData().GetDepartureRwy() },
+		{ "sid", flightplan.GetFlightPlanData().GetSidName() },
+		{ "assr", flightplan.GetControllerAssignedData().GetSquawk() },
+		{ "atis", atisLetter },
+		{ "uname", controller.GetCallsign() },
+		{ "freq", FreqTruncate(controller.GetPrimaryFrequency()) },
+		{ "time", ZuluTimeStringGen() },
+		{ "date", YYMMDDString() },
+		{ "actype", flightplan.GetFlightPlanData().GetAircraftFPType() },
+		{ "cfl", cruise },
+		{ "rte", rteStr },
+	};
+
+	this->messageType = rule->messageType;
+	this->responseRequired = rule->responseRequired;
+	this->rawMessageContent = SituCpdlcDcl::Format(rule->text, fields);
+
+	if (wanted == "FSMREJECT") { return "RCDRejected"; }
+	if (subtype == "FSM") { return "CDAPending"; }
+	if (rule->messageType == "cpdlc") { return "CDAPending"; }
+
+	return std::to_string(pdcNumbers) + identifierLetter;
 }
 
 void CPDLCMessage::processMessage() { // should loop with every Poll try resending messages or automatically generate responses where appropriate

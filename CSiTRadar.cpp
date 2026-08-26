@@ -14,6 +14,8 @@ bool CSiTRadar::halfSecTick = FALSE;
 CRadarScreen* CSiTRadar::m_pRadScr;
 unordered_map<int, ACList> acLists;
 SituTbs::Config CSiTRadar::tbsConfig;
+SituCpdlcStations::Table CSiTRadar::cpdlcStations;
+SituCpdlcFreetext::Table CSiTRadar::cpdlcFreetext;
 unordered_map<string, bool> CSiTRadar::acADSB;
 unordered_map<string, bool> CSiTRadar::acRVSM;
 std::shared_mutex CSiTRadar::acCapabilityMutex;
@@ -93,8 +95,17 @@ void CSiTRadar::DrainCPDLCPoll()
 		if (message.opensMnemonic) {
 			aircraft->second.cpdlcMnemonic = true;
 		}
-		if (message.rawMessageContent == "LOGOFF") {
-			aircraft->second.cpdlcState = 0;
+		// Connection state. REQUEST LOGON is how an aircraft asks; LOGOFF is how it
+		// leaves. Until now this field was written to zero in one place and read
+		// nowhere, so the window could not tell an aircraft that had asked to connect
+		// from one that never had.
+		if (message.rawMessageContent == "REQUEST LOGON") {
+			if (aircraft->second.cpdlcState != CPDLC_CONNECTED) {
+				aircraft->second.cpdlcState = CPDLC_LOGON_REQUESTED;
+			}
+		}
+		else if (message.rawMessageContent == "LOGOFF") {
+			aircraft->second.cpdlcState = CPDLC_NOT_CONNECTED;
 		}
 	}
 }
@@ -156,113 +167,118 @@ CSiTRadar::CSiTRadar()
 			}
 		}
 
-		// Absolute, so the settings are read from the same place they were written to.
-		// The old ".\situWx\settings.json" resolved against EuroScope's working directory,
-		// which moves whenever a file dialog is used.
-		const std::string situWxSettings = wxRadar::getSituWxDir() + "settings.json";
+		// CPDLC station table. Absent, every next data authority lookup fails and says
+		// so, which is the right outcome - it never invents a station.
+		{
+			const std::string cpdlcPath = wxRadar::getSituWxDir() + "SituCPDLC.txt";
+			if (SituFiles::Exists(cpdlcPath)) {
+				const SituConfig::ParseResult cpdlcParsed = SituConfig::Parse(SituFiles::Read(cpdlcPath));
+				cpdlcStations = SituCpdlcStations::Parse(cpdlcParsed);
+				CPDLCMessage::dclTable = SituCpdlcDcl::Parse(cpdlcParsed);
+				cpdlcFreetext = SituCpdlcFreetext::Parse(cpdlcParsed);
 
-		std::ifstream settings_file(situWxSettings.c_str());
-		if (settings_file.is_open()) {
-			json j = json::parse(settings_file);
-
-			wxRadar::wxLatCtr = j["wxlat"];
-			wxRadar::wxLongCtr = j["wxlong"];
-
-			// List positions are offsets from the top left of the radar area. A file
-			// written before that change stores absolute screen coordinates under the
-			// old key names, so read those instead and convert on the first draw, when
-			// the radar area is known. Reading an old absolute value as an offset would
-			// move every list by the radar area origin.
-			//
-			// Each list is guarded on its own: a settings file predating any one of them
-			// has no such key, and an unguarded read throws and abandons every setting
-			// below it - which is how the message list key broke this block before.
-			const auto readListPosition = [&j](ACList& list, const char* offsetKey, const char* absoluteKey) {
-				if (!j[offsetKey].is_null()) {
-					list.offset.x = j[offsetKey]["x"];
-					list.offset.y = j[offsetKey]["y"];
-					list.offsetIsAbsolute = false;
+				if (!cpdlcStations.skippedLines.empty()) {
+					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+						("SituCPDLC.txt: " + std::to_string(cpdlcStations.skippedLines.size())
+							+ " line(s) not understood and ignored").c_str(),
+						true, true, false, false, false);
 				}
-				else if (!j[absoluteKey].is_null()) {
-					list.offset.x = j[absoluteKey]["x"];
-					list.offset.y = j[absoluteKey]["y"];
-					list.offsetIsAbsolute = true;
-				}
-			};
-
-			readListPosition(acLists[LIST_TIME_ATIS], "atisListOffset", "atisList");
-			readListPosition(acLists[LIST_OFF_SCREEN], "offScreenListOffset", "offScreenList");
-			readListPosition(acLists[LIST_MESSAGES], "messageListOffset", "messageList");
-
-			menuState.numHistoryDots = j["menuState"]["numHistoryDots"];
-			menuState.bigACID = j["menuState"]["bigACID"];
-			menuState.wxAll = j["menuState"]["wxAll"];
-			menuState.filterBypassAll = j["menuState"]["filterBypassAll"];
-			menuState.extAltToggle = j["menuState"]["extAltToggle"];
-
-			// Guarded like the other late additions - a settings file predating CPDLC has
-			// neither key, and an unguarded read throws and abandons the rest of the load.
-			if (!j["hoppieCode"].is_null()) {
-				CPDLCMessage::hoppieCode = j["hoppieCode"];
-			}
-			// Upstream persists only the logon code, so the centre had to be retyped every
-			// session. It is a per-position setting like any other; keep it.
-			if (!j["hoppieICAO"].is_null()) {
-				CPDLCMessage::hoppieICAO = j["hoppieICAO"];
-			}
-
-			if (!j["prefSFI"].is_null()) {
-				menuState.SFIPrefStringDefault = j["prefSFI"];
-			}
-			if (!j["ctrlRemarks"].is_null()) {
-				for (int i = 0; i < 7; i++) {
-					menuState.ctrlRemarkDefaults[i] = j["ctrlRemarks"][i];
+				for (const std::string& duplicate : cpdlcStations.duplicateControllerIds) {
+					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+						("SituCPDLC.txt: controller id " + duplicate
+							+ " is claimed by more than one station; the callsign prefix decides").c_str(),
+						true, true, false, false, false);
 				}
 			}
-
 		}
-		// write defaults if no file
-		else {
-			// The folder may not exist yet - the weather path is what usually creates it.
-			CreateDirectoryA(wxRadar::getSituWxDir().c_str(), NULL);
-			std::ofstream settings_file(situWxSettings.c_str());
 
-			json j;
-			j["wxlat"] = wxRadar::wxLatCtr;
-			j["wxlong"] = wxRadar::wxLongCtr;
+		// Settings live beside the DLL, resolved against the module rather than the
+		// process working directory. ".\situWx\" resolved against EuroScope's, and any
+		// file dialog moves that, which is how these folders ended up scattered.
+		const std::string settingsPath = wxRadar::getSituWxDir() + "settings.txt";
+		const std::string localPath = wxRadar::getSituWxDir() + "SituLocal.txt";
+		const std::string legacyPath = wxRadar::getSituWxDir() + "settings.json";
 
-			// Written under new key names so an older build reading this file falls back
-			// to its own defaults rather than treating an offset as a screen position.
-			j["atisListOffset"]["x"] = acLists[LIST_TIME_ATIS].offset.x;
-			j["atisListOffset"]["y"] = acLists[LIST_TIME_ATIS].offset.y;
+		SituSettings::Settings settings;
+		SituSettings::LocalSettings local;
+		bool migratedFromJson = false;
 
-			j["offScreenListOffset"]["x"] = acLists[LIST_OFF_SCREEN].offset.x;
-			j["offScreenListOffset"]["y"] = acLists[LIST_OFF_SCREEN].offset.y;
+		if (SituFiles::Exists(settingsPath)) {
+			settings = SituSettings::Parse(SituConfig::Parse(SituFiles::Read(settingsPath)));
+		}
+		else if (SituFiles::Exists(legacyPath)) {
+			// One time migration, and the last time this file is read at all.
+			//
+			// json::parse throws json::parse_error, which does not derive from
+			// ifstream::failure - the type the old code caught - so a malformed file threw
+			// out of this constructor, which EuroScope calls from OnRadarScreenCreated. An
+			// exception leaving an SDK callback unwinds through frames built by another
+			// compiler in a separately linked binary. Caught by base type here.
+			try {
+				settings = SituLegacy::SettingsFromJson(SituFiles::Read(legacyPath), local);
+				migratedFromJson = true;
+			}
+			catch (const std::exception&) {
+				GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings",
+					"settings.json could not be read; starting from defaults",
+					true, true, false, false, false);
+			}
+		}
 
-			j["messageListOffset"]["x"] = acLists[LIST_MESSAGES].offset.x;
-			j["messageListOffset"]["y"] = acLists[LIST_MESSAGES].offset.y;
+		if (SituFiles::Exists(localPath)) {
+			local = SituSettings::ParseLocal(SituConfig::Parse(SituFiles::Read(localPath)));
+		}
 
-			j["hoppieCode"] = CPDLCMessage::hoppieCode;
-			j["hoppieICAO"] = CPDLCMessage::hoppieICAO;
+		wxRadar::wxLatCtr = settings.wxLat;
+		wxRadar::wxLongCtr = settings.wxLong;
 
-			j["prefSFI"] = menuState.SFIPrefStringDefault;
+		acLists[LIST_TIME_ATIS].offset = { settings.atisListOffset.x, settings.atisListOffset.y };
+		acLists[LIST_OFF_SCREEN].offset = { settings.offScreenListOffset.x, settings.offScreenListOffset.y };
+		acLists[LIST_MESSAGES].offset = { settings.messageListOffset.x, settings.messageListOffset.y };
 
-			j["ctrlRemarks"] = menuState.ctrlRemarkDefaults;
+		menuState.numHistoryDots = settings.historyDots;
+		menuState.bigACID = settings.bigACID;
+		menuState.wxAll = settings.wxAll;
+		menuState.filterBypassAll = settings.filterBypassAll;
+		menuState.extAltToggle = settings.extAltToggle;
+		menuState.SFIPrefStringDefault = settings.prefSFI;
 
-			j["menuState"]["numHistoryDots"] = menuState.numHistoryDots;
-			j["menuState"]["bigACID"] = menuState.bigACID;
-			j["menuState"]["wxAll"] = menuState.wxAll;
-			j["menuState"]["filterBypassAll"] = menuState.filterBypassAll;
-			j["menuState"]["extAltToggle"] = menuState.extAltToggle;
+		for (size_t i = 0; i < menuState.ctrlRemarkDefaults.size() && i < settings.controllerRemarks.size(); i++) {
+			menuState.ctrlRemarkDefaults[i] = settings.controllerRemarks[i];
+		}
 
+		CPDLCMessage::cpdlcServer = settings.cpdlcServer;
+		CPDLCMessage::hoppieCode = local.hoppieCode;
+		CPDLCMessage::hoppieICAO = local.hoppieICAO;
 
-			settings_file << j;
+		// Say what was thrown away rather than dropping it quietly.
+		const size_t badLines = settings.skippedLines.size() + local.skippedLines.size();
+		if (badLines != 0) {
+			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings",
+				(std::to_string(badLines) + " settings line(s) not understood and ignored").c_str(),
+				true, true, false, false, false);
+		}
+
+		if (migratedFromJson) {
+			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings",
+				"settings.json migrated to settings.txt; the logon code moved to SituLocal.txt",
+				true, true, false, false, false);
 		}
 	}
-	catch (std::ifstream::failure e) {
-
-	};
-
+	catch (const std::exception& e) {
+		// Nothing above should throw: the tokeniser and the settings parsers do not, and
+		// the one remaining JSON read carries its own handler. This is the backstop.
+		//
+		// It catches std::exception rather than std::ifstream::failure, which is what was
+		// here before and is a type that neither json::parse_error nor json::type_error
+		// derives from - so the handler that looked like it covered this never did. A
+		// constructor called from OnRadarScreenCreated must not let anything out: an
+		// exception leaving an SDK callback unwinds through frames built by a different
+		// compiler in a separately linked binary.
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings",
+			(string("settings load failed: ") + e.what()).c_str(),
+			true, true, false, false, false);
+	}
 
 	try {
 		if ( (((clock() - menuState.lastWxRefresh) / CLOCKS_PER_SEC) > 600 && (menuState.wxAll || menuState.wxHigh)) ||
@@ -303,49 +319,43 @@ CSiTRadar::CSiTRadar()
 
 CSiTRadar::~CSiTRadar()
 {
-	// Save settings file
-	try {
+	// Save settings. Written every time rather than only when a file already existed:
+	// the old code opened the file for reading first and skipped the whole save if that
+	// failed, so a fresh install never persisted anything at all.
+	SituSettings::Settings settings;
+	settings.wxLat = wxRadar::wxLatCtr;
+	settings.wxLong = wxRadar::wxLongCtr;
 
-		const std::string situWxSettings = wxRadar::getSituWxDir() + "settings.json";
+	settings.atisListOffset = { acLists[LIST_TIME_ATIS].offset.x, acLists[LIST_TIME_ATIS].offset.y };
+	settings.offScreenListOffset = { acLists[LIST_OFF_SCREEN].offset.x, acLists[LIST_OFF_SCREEN].offset.y };
+	settings.messageListOffset = { acLists[LIST_MESSAGES].offset.x, acLists[LIST_MESSAGES].offset.y };
 
-		std::ifstream settings_file(situWxSettings.c_str());
-		if (settings_file.is_open()) {
-			std::ofstream settings_file(situWxSettings.c_str());
+	settings.historyDots = menuState.numHistoryDots;
+	settings.bigACID = menuState.bigACID;
+	settings.wxAll = menuState.wxAll;
+	settings.filterBypassAll = menuState.filterBypassAll;
+	settings.extAltToggle = menuState.extAltToggle;
+	settings.prefSFI = menuState.SFIPrefStringDefault;
+	settings.cpdlcServer = CPDLCMessage::cpdlcServer;
 
-			json j;
-			j["wxlat"] = wxRadar::wxLatCtr;
-			j["wxlong"] = wxRadar::wxLongCtr;
-
-			// Written under new key names so an older build reading this file falls back
-			// to its own defaults rather than treating an offset as a screen position.
-			j["atisListOffset"]["x"] = acLists[LIST_TIME_ATIS].offset.x;
-			j["atisListOffset"]["y"] = acLists[LIST_TIME_ATIS].offset.y;
-
-			j["offScreenListOffset"]["x"] = acLists[LIST_OFF_SCREEN].offset.x;
-			j["offScreenListOffset"]["y"] = acLists[LIST_OFF_SCREEN].offset.y;
-
-			j["messageListOffset"]["x"] = acLists[LIST_MESSAGES].offset.x;
-			j["messageListOffset"]["y"] = acLists[LIST_MESSAGES].offset.y;
-
-			j["hoppieCode"] = CPDLCMessage::hoppieCode;
-			j["hoppieICAO"] = CPDLCMessage::hoppieICAO;
-
-			j["prefSFI"] = menuState.SFIPrefStringDefault;
-
-			j["ctrlRemarks"] = menuState.ctrlRemarkDefaults;
-
-			j["menuState"]["numHistoryDots"] = menuState.numHistoryDots;
-			j["menuState"]["bigACID"] = menuState.bigACID;
-			j["menuState"]["wxAll"] = menuState.wxAll;
-			j["menuState"]["filterBypassAll"] = menuState.filterBypassAll;
-			j["menuState"]["extAltToggle"] = menuState.extAltToggle;
-
-			settings_file << j;
-		}
+	for (size_t i = 0; i < settings.controllerRemarks.size() && i < menuState.ctrlRemarkDefaults.size(); i++) {
+		settings.controllerRemarks[i] = menuState.ctrlRemarkDefaults[i];
 	}
-	catch (std::ifstream::failure e) {
 
-	};
+	SituSettings::LocalSettings local;
+	local.hoppieCode = CPDLCMessage::hoppieCode;
+	local.hoppieICAO = CPDLCMessage::hoppieICAO;
+
+	// The folder may not exist yet; the weather path is what usually creates it.
+	CreateDirectoryA(wxRadar::getSituWxDir().c_str(), NULL);
+
+	SituFiles::Write(wxRadar::getSituWxDir() + "settings.txt", SituSettings::Serialize(settings));
+
+	// Only written once there is something to write, so an install that has never used
+	// CPDLC does not grow a file whose only purpose is to hold a credential.
+	if (!local.hoppieCode.empty() || !local.hoppieICAO.empty()) {
+		SituFiles::Write(wxRadar::getSituWxDir() + "SituLocal.txt", SituSettings::SerializeLocal(local));
+	}
 
 	m_pRadScr = nullptr;
 }
@@ -2112,6 +2122,270 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 	dc.Detach();
 }
 
+// A blank uplink addressed to an aircraft, with its identifier allocated.
+//
+// The real MIN range is 0 to 63; Hoppie allows more, so the counter is kept whole and
+// only the value on the wire rolls over.
+CPDLCMessage CSiTRadar::NewCPDLCUplink(const std::string& callsign)
+{
+	CPDLCMessage uplink;
+	uplink.isdlMessage = false;
+	uplink.messageType = "cpdlc";
+	uplink.receipient = callsign;
+	uplink.sender = CPDLCMessage::hoppieICAO;
+	uplink.timeParsed = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+	uplink.messageID = (int)(CPDLCMessage::ids++ % 64);
+	return uplink;
+}
+
+// Sends on a worker and records the message against the aircraft.
+//
+// cpdlc.cpp touches no EuroScope SDK, which is what makes moving the send off this
+// thread safe. The copy is deliberate: the worker outlives this call.
+void CSiTRadar::DispatchCPDLCUplink(CPDLCMessage uplink, const std::string& callsign)
+{
+	const std::string preview = uplink.rawMessageContent;
+
+	std::thread send([uplink]() mutable { uplink.SendCPDLCMessage(); });
+	send.detach();
+
+	mAcData[callsign].CPDLCMessages.push_back(uplink);
+
+	GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+		(callsign + ": " + preview).c_str(), true, true, false, false, false);
+
+	RequestRefresh();
+}
+
+// The most recent downlink still waiting on an answer. A reply button means "answer what
+// I am looking at", and this is what that is when nothing has been selected explicitly.
+CPDLCMessage* CSiTRadar::LatestOpenDownlink(const std::string& callsign)
+{
+	auto aircraft = mAcData.find(callsign);
+	if (aircraft == mAcData.end()) { return nullptr; }
+
+	std::vector<CPDLCMessage>& messages = aircraft->second.CPDLCMessages;
+
+	for (size_t i = messages.size(); i > 0; --i)
+	{
+		CPDLCMessage& candidate = messages[i - 1];
+		if (!candidate.isdlMessage) { continue; }
+		if (candidate.messageID == -1) { continue; }
+		if (candidate.responseRequired != "Y") { continue; }
+
+		// Answered already if anything references it.
+		bool answered = false;
+		for (const CPDLCMessage& other : messages)
+		{
+			if (other.responseToMessageID == candidate.messageID) { answered = true; break; }
+		}
+		if (!answered) { return &candidate; }
+	}
+	return nullptr;
+}
+
+// Accepts an aircraft's logon request.
+//
+// Hoppie's protocol for this is two plain text messages and nothing more: the aircraft
+// sends REQUEST LOGON, the station answers LOGON ACCEPTED.
+void CSiTRadar::AcceptCPDLCLogon(const std::string& callsign)
+{
+	if (mAcData[callsign].cpdlcState == CPDLC_CONNECTED) {
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+			(callsign + ": already connected").c_str(), true, true, false, false, false);
+		return;
+	}
+
+	CPDLCMessage uplink = NewCPDLCUplink(callsign);
+	uplink.responseRequired = "NE";
+	uplink.rawMessageContent = "LOGON ACCEPTED";
+
+	// Answer the request itself where there is one, so the two are paired in the list
+	// rather than sitting there as two unrelated lines.
+	CPDLCMessage* request = LatestOpenDownlink(callsign);
+	if (request != nullptr && request->rawMessageContent == "REQUEST LOGON") {
+		uplink.responseToMessageID = request->messageID;
+	}
+
+	mAcData[callsign].cpdlcState = CPDLC_CONNECTED;
+	DispatchCPDLCUplink(uplink, callsign);
+}
+
+// Ends the CPDLC service for an aircraft.
+//
+// The wording comes from the [FREETEXT] entry marked UNICOM when the file has one, which
+// is where a unit puts what it wants said - CZQM's reads "SERVICES TERMINATED - MNT
+// UNICOM 122.8". Falling back to a plain phrase rather than refusing, because ending a
+// service must not depend on a config file having the row.
+void CSiTRadar::EndCPDLCService(const std::string& callsign)
+{
+	if (mAcData[callsign].cpdlcState != CPDLC_CONNECTED) {
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+			(callsign + ": not connected").c_str(), true, true, false, false, false);
+		return;
+	}
+
+	std::string text = "CPDLC SERVICE TERMINATED";
+	std::string reply = "NE";
+
+	for (const SituCpdlcFreetext::Entry& entry : cpdlcFreetext.entries) {
+		if (!entry.terminatesService) { continue; }
+		text = entry.text;
+		reply = entry.replyType;
+		break;
+	}
+
+	CPDLCMessage uplink = NewCPDLCUplink(callsign);
+	uplink.responseRequired = reply;
+	uplink.rawMessageContent = text;
+
+	mAcData[callsign].cpdlcState = CPDLC_NOT_CONNECTED;
+	mAcData[callsign].cpdlcMnemonic = false;
+	DispatchCPDLCUplink(uplink, callsign);
+}
+
+// Sends one of the canned messages, chosen by the button's label.
+//
+// The wording and the reply type both come from [FREETEXT] in SituCPDLC.txt rather than
+// from a table in here, so a unit that wants "APPROVED" instead of "ROGER" edits a file.
+void CSiTRadar::SendCPDLCFreetext(const std::string& callsign, const std::string& label)
+{
+	const SituCpdlcFreetext::Entry* entry = SituCpdlcFreetext::Find(cpdlcFreetext, label);
+	if (entry == nullptr) {
+		// A button with nothing behind it says so. Sending a message the controller did
+		// not choose, with a reply type nobody set, is the worse outcome.
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+			(label + ": no such message in SituCPDLC.txt [FREETEXT]").c_str(),
+			true, true, false, false, false);
+		return;
+	}
+
+	CPDLCMessage uplink = NewCPDLCUplink(callsign);
+	uplink.responseRequired = entry->replyType;
+	uplink.rawMessageContent = entry->text;
+
+	CPDLCMessage* answering = LatestOpenDownlink(callsign);
+	if (answering != nullptr) { uplink.responseToMessageID = answering->messageID; }
+
+	// The mnemonic marks an unread downlink. Answering one is what clears it.
+	if (answering != nullptr) { mAcData[callsign].cpdlcMnemonic = false; }
+
+	DispatchCPDLCUplink(uplink, callsign);
+}
+
+void CSiTRadar::CloseCPDLCEditor(const std::string& callsign)
+{
+	for (auto it = menuState.radarScrWindows.begin(); it != menuState.radarScrWindows.end(); ++it) {
+		if (it->second.m_winType == WINDOW_CPDLC_EDITOR && it->second.m_callsign == callsign) {
+			menuState.radarScrWindows.erase(it);
+			return;
+		}
+	}
+}
+
+void CSiTRadar::OpenCPDLCEditor(const std::string& callsign, POINT at)
+{
+	// One editor per aircraft. A second click moves the one that is open rather than
+	// stacking another on top of it.
+	for (auto& win : menuState.radarScrWindows) {
+		if (win.second.m_winType == WINDOW_CPDLC_EDITOR && win.second.m_callsign == callsign) {
+			win.second.m_origin = at;
+			return;
+		}
+	}
+
+	CFlightPlan fp = GetPlugIn()->FlightPlanSelect(callsign.c_str());
+	if (!fp.IsValid()) { return; }
+
+	// operator[] rather than at: an aircraft with no record yet would throw out of a
+	// EuroScope callback, and an empty message list is the right thing to show.
+	CAppWindows editor(at, WINDOW_CPDLC_EDITOR, fp, GetRadarArea(), mAcData[callsign].CPDLCMessages);
+	editor.m_callsign = callsign;
+	menuState.radarScrWindows[editor.m_windowId_] = editor;
+}
+
+// Composes and sends one of the manual CPDLC uplinks from the callsign menu.
+//
+// Everything it needs to know about the next controller comes from SituCPDLC.txt and
+// from what that controller has said about themselves, rather than from a table of
+// facility names compiled into the plugin.
+void CSiTRadar::SendCPDLCUplink(const std::string& which)
+{
+	CFlightPlan fp = GetPlugIn()->FlightPlanSelectASEL();
+	if (!fp.IsValid()) { return; }
+
+	const std::string callsign = fp.GetCallsign();
+
+	// Who the aircraft is going to. During a handoff that is the handoff target;
+	// otherwise it is whoever has been coordinated as next. Both are position ids except
+	// GetCoordinatedNextController, which returns a callsign, so it is converted.
+	std::string nextPositionId = fp.GetHandoffTargetControllerId();
+	std::string nextCallsign;
+
+	if (!nextPositionId.empty()) {
+		nextCallsign = GetPlugIn()->ControllerSelectByPositionId(nextPositionId.c_str()).GetCallsign();
+	}
+	else {
+		nextCallsign = fp.GetCoordinatedNextController();
+		if (!nextCallsign.empty()) {
+			nextPositionId = GetPlugIn()->ControllerSelect(nextCallsign.c_str()).GetPositionId();
+		}
+	}
+
+	if (nextCallsign.empty() && nextPositionId.empty()) {
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+			(callsign + ": no next controller to name; hand off or coordinate one first").c_str(),
+			true, true, false, false, false);
+		return;
+	}
+
+	const SituCpdlcStations::Resolution next =
+		SituCpdlcStations::Resolve(cpdlcStations, nextPositionId, nextCallsign);
+
+	CPDLCMessage uplink = NewCPDLCUplink(callsign);
+
+	if (which == "CPDLCNDA") {
+		// Refuse rather than guess. A next data authority the far end is not listening
+		// on fails silently there, where the sending controller cannot see it.
+		if (!next.found) {
+			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+				(callsign + ": no CPDLC station known for " + (nextCallsign.empty() ? nextPositionId : nextCallsign)
+					+ "; add it to SituCPDLC.txt").c_str(),
+				true, true, false, false, false);
+			return;
+		}
+
+		uplink.responseRequired = "NE";
+		uplink.rawMessageContent = SituCpdlcStations::FormatHandover(cpdlcStations, next);
+	}
+	else if (which == "CPDLCContact" || which == "CPDLCMonitor") {
+		// The radio callsign from the station table when there is one, since that is what
+		// the unit is called on frequency; the raw callsign otherwise.
+		const std::string spoken = next.found && !next.radioCallsign.empty()
+			? next.radioCallsign
+			: nextCallsign;
+
+		const double frequency = nextCallsign.empty()
+			? 0.0
+			: GetPlugIn()->ControllerSelect(nextCallsign.c_str()).GetPrimaryFrequency();
+
+		// 199.998 is what the SDK returns when no primary frequency is selected, and
+		// UNICOM is where an aircraft goes when nobody is next.
+		const std::string spokenFrequency = (frequency > 0.0 && frequency < 199.0)
+			? CPDLCMessage::FreqTruncate(frequency)
+			: std::string("122.800");
+
+		uplink.responseRequired = "WU";
+		uplink.rawMessageContent = (which == "CPDLCContact" ? "CONTACT @" : "MONITOR @")
+			+ spoken + "@ @" + spokenFrequency + "@";
+	}
+	else {
+		return;
+	}
+
+	DispatchCPDLCUplink(uplink, callsign);
+}
+
 void CSiTRadar::OnClickScreenObject(int ObjectType,
 	const char* sObjectId,
 	POINT Pt,
@@ -2187,12 +2461,42 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 	}
 
 	if (ObjectType == WINDOW_CPDLC) {
+		auto window = GetAppWindowFromObjectId(id);
+		if (window == nullptr) { return; }
+
+		const std::string cs = window->m_callsign;
+
 		if (func == "Close") {
+			// The editor belongs to this window; closing the parent takes it with it.
+			CloseCPDLCEditor(cs);
 			menuState.radarScrWindows.erase(stoi(id));
-			RequestRefresh();
 		}
-		// The reply and category buttons are drawn but not wired up yet. Clicking one
-		// does nothing rather than doing something half defined.
+		else if (func == "Close Dialog") {
+			CloseCPDLCEditor(cs);
+		}
+		else if (func == "Connect") {
+			AcceptCPDLCLogon(cs);
+		}
+		else if (func == "End Service") {
+			EndCPDLCService(cs);
+		}
+		else if (func == "Flight Plan") {
+			CFlightPlan fp = GetPlugIn()->FlightPlanSelect(cs.c_str());
+			if (fp.IsValid()) {
+				CAppWindows fpWindow(Pt, WINDOW_FLIGHT_PLAN, fp, GetRadarArea());
+				fpWindow.m_callsign = cs;
+				menuState.radarScrWindows[fpWindow.m_windowId_] = fpWindow;
+			}
+		}
+		else if (!func.empty()) {
+			// A canned message, looked up by the button's own label. The category
+			// buttons - Altitude, Speed, Route and the rest - have no [FREETEXT] entry
+			// and no value picker behind them yet, so they report that rather than
+			// guessing at a message.
+			SendCPDLCFreetext(cs, func);
+		}
+
+		RequestRefresh();
 		return;
 	}
 
@@ -2408,7 +2712,22 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 		}
 		auto window = GetAppWindowFromObjectId(win);
 		if (window == nullptr) { return; }
-		
+
+		// A click in the CPDLC message list selects that message and opens the editor
+		// against it, which is what a reply button then answers. The generic selection
+		// below works on m_ListBoxElementText, which a CPDLC row does not use - its
+		// content is the message, not that string - so it is handled here instead.
+		if (window->m_winType == WINDOW_CPDLC) {
+			for (auto& lb : window->m_listboxes_) {
+				for (auto& lelem : lb.listBox_) {
+					lelem.m_selected_ = (lelem.m_elementID == stoi(le));
+				}
+			}
+			OpenCPDLCEditor(window->m_callsign, { Pt.x, Pt.y + 40 });
+			RequestRefresh();
+			return;
+		}
+
 		for (auto &lb : window->m_listboxes_) {
 			for (auto &lelem : lb.listBox_) {
 				if (lelem.m_elementID == stoi(le)) {
@@ -2672,6 +2991,10 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 			if (strcmp(sObjectId, "EXP")) {
 				menuState.MB3menu = false;
 			}
+		}
+		if (!strcmp(menuState.MB3SecondaryMenuType.c_str(), "CPDLCMenu")) {
+			menuState.MB3menu = false;
+			SendCPDLCUplink(sObjectId);
 		}
 		if (!strcmp(menuState.MB3SecondaryMenuType.c_str(), "SetComm")) {
 			menuState.MB3menu = false;

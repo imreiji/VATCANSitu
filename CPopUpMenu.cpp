@@ -66,6 +66,13 @@ void CPopUpMenu::populateMenu()
         this->m_listElements.emplace_back(SPopUpElement("Direct To", "DirectTo", 0, 0));
         this->m_listElements.emplace_back(SPopUpElement("Mod SFI", "ModSFI", 0, 1));
         this->m_listElements.emplace_back(SPopUpElement("Comm. Type", "SetComm", 0, 1));
+
+        // Only offered while logged on. Without a Hoppie connection the message has
+        // nowhere to go, and a menu item that silently does nothing is worse than one
+        // that is not there.
+        if (CSiTRadar::menuState.CPDLCOn) {
+            this->m_listElements.emplace_back(SPopUpElement("CPDLC", "CPDLCMenu", 0, 1));
+        }
     }
     if (CSiTRadar::mAcData[m_fp->GetCallsign()].pointOutPendingApproval) {
         this->m_listElements.emplace_back(SPopUpElement("Accept P/Out", "AcceptPointOut", 0, 0));
@@ -115,6 +122,12 @@ void CPopUpMenu::populateSecondaryMenu(string type) {
             letter = c;
             this->m_listElements.emplace_back(SPopUpElement(letter, letter, 0, 0, 40));
         }
+    }
+    if (!strcmp(type.c_str(), "CPDLCMenu")) {
+        this->m_listElements.emplace_back(SPopUpElement("NEXT DATA AUTHORITY", "CPDLCNDA", 0, 0, 170));
+        this->m_listElements.emplace_back(SPopUpElement("CONTACT", "CPDLCContact", 0, 0, 170));
+        this->m_listElements.emplace_back(SPopUpElement("MONITOR", "CPDLCMonitor", 0, 0, 170));
+        this->m_listElements.emplace_back(SPopUpElement("CPDLC", "CPDLC", 1, 0, 170));
     }
     if (!strcmp(type.c_str(), "SetComm")) {
         this->m_listElements.emplace_back(SPopUpElement("V", "V", 0, 0, 40));
