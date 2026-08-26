@@ -7,7 +7,7 @@
 #include <fstream>
 #include <sstream>
 #include "json.hpp"
-#include "curl/curl.h"
+#include "HttpClient.h"
 #include "CAsyncResponse.h"
 #include <set>
 #include <mutex>
@@ -21,17 +21,6 @@ struct cell {
     int dbz;
     CPosition cellPos;
 };
-
-static size_t write_data(void* buffer, size_t size, size_t nmemb, void* userp) {
-    ((std::string*)userp)->append((char*)buffer, size * nmemb);
-    return size * nmemb;
-};
-
-static size_t write_file(void* ptr, size_t size, size_t nmemb, void* stream)
-{
-    size_t written = fwrite(ptr, size, nmemb, (FILE*)stream);
-    return written;
-}
 
 class wxRadar :
     public CRadarScreen
@@ -603,25 +592,24 @@ public:
 
     static void GetRainViewerJSON(CRadarScreen* rad) {
 
-        CURL* rainViewerJson = curl_easy_init();
+        // maps.json was retired. It returned a flat array of timestamps, so the parse
+        // below took j.back(). weather-maps.json returns an object, and reading it with
+        // the old parse threw on every refresh - the crash reported upstream.
+        //
+        // This had no timeout at all, so a hung RainViewer stalled the caller
+        // indefinitely - and parseRadarPNG runs on the main thread.
+        const SituHttp::Response rainViewer =
+            SituHttp::Get("https://api.rainviewer.com/public/weather-maps.json", 5000);
 
-        string rainViewerJsonString;
-
-        if (rainViewerJson)
-        {
-            // maps.json was retired. It returned a flat array of timestamps, so the parse
-            // below took j.back(). weather-maps.json returns an object, and reading it with
-            // the old parse threw on every refresh - the crash reported upstream.
-            curl_easy_setopt(rainViewerJson, CURLOPT_URL, "https://api.rainviewer.com/public/weather-maps.json");
-            curl_easy_setopt(rainViewerJson, CURLOPT_WRITEFUNCTION, write_data);
-            curl_easy_setopt(rainViewerJson, CURLOPT_WRITEDATA, &rainViewerJsonString);
-            CURLcode res;
-            res = curl_easy_perform(rainViewerJson);
-            curl_easy_cleanup(rainViewerJson);
+        if (!rainViewer.ok) {
+            rad->GetPlugIn()->DisplayUserMessage("VATCANSitu", "Error",
+                ("Failed to get RainViewer JSON - " + rainViewer.error).c_str(),
+                true, true, true, true, true);
+            return;
         }
 
         try {
-            json j = json::parse(rainViewerJsonString);
+            json j = json::parse(rainViewer.body);
 
             // ts now carries a whole URL prefix (host + the newest radar frame's path)
             // rather than a bare timestamp, so the tile URL in parseRadarPNG no longer

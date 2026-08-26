@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "CSiTRadar.h"
+#include "PositionString.h"
 
 using namespace Gdiplus;
 
@@ -763,7 +764,17 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 								radarTarget.GetCorrelatedFlightPlan().GetDistanceToDestination() > 1 &&
 								radarTarget.GetPosition().GetPressureAltitude() > 500) {
 
-								int i = radarTarget.GetTrackHeading() - menuState.tbsHdg + 10 ; // ES reports in true, 10 for mag var in CYYZ
+								// ES reports track in true, tbsHdg is magnetic, and 10 is the CYYZ
+								// variation that converts between them. Normalised to -180..180
+								// so a heading either side of north is still a small difference:
+								// the raw subtraction reads 358 against 5 as 363, not -7, which
+								// would silently refuse to engage TBS on a runway near north.
+								double headingDelta = radarTarget.GetTrackHeading() - menuState.tbsHdg + 10;
+								headingDelta = fmod(headingDelta + 180.0, 360.0);
+								if (headingDelta < 0) { headingDelta += 360.0; }
+								headingDelta -= 180.0;
+
+								const int i = static_cast<int>(headingDelta);
 
 								if (i < 7 && i > -7)
 								{
@@ -2191,39 +2202,8 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 						menuState.radarScrWindows.erase(stoi(id));
 						GetPlugIn()->FlightPlanSelect(cs.c_str()).GetControllerAssignedData().SetDirectToPointName(c.c_str());
 
-						string pposStr;
-						float lat, lon, latmin, lonmin;
-						double longitudedecmin = modf(GetPlugIn()->RadarTargetSelect(cs.c_str()).GetPosition().GetPosition().m_Longitude, &lon);
-						double latitudedecmin = modf(GetPlugIn()->RadarTargetSelect(cs.c_str()).GetPosition().GetPosition().m_Latitude, &lat);
-
-						latmin = static_cast<float>(abs(round(latitudedecmin * 60)));
-						lonmin = static_cast<float>(abs(round(longitudedecmin * 60)));
-						string lonstring = to_string(static_cast<int>(abs(lon)));
-						if (lonstring.size() < 3) {
-							lonstring.insert(lonstring.begin(), 3 - lonstring.size(), '0');
-						}
-
-						if (lon < 0) {
-							if (lat > 0) {
-								// W N
-								pposStr = to_string(static_cast<int>(lat)) + to_string(static_cast<int>(latmin)) + "N" + lonstring + to_string(static_cast<int>(lonmin)) + "W";
-							}
-							else {
-								// W S
-								pposStr = to_string(static_cast<int>(abs(lat))) + to_string(static_cast<int>(latmin)) + "S" + lonstring + to_string(static_cast<int>(lonmin)) + "W";
-							}
-
-						}
-						else {
-							if (lat > 0) {
-								//  E N
-								pposStr = to_string(static_cast<int>(lat)) + to_string(static_cast<int>(latmin)) + "N" + lonstring + to_string(static_cast<int>(lonmin)) + "E";
-							}
-							else {
-								// E S
-								pposStr = to_string(static_cast<int>(abs(lat))) + to_string(static_cast<int>(latmin)) + "S" + lonstring + to_string(static_cast<int>(lonmin)) + "E";
-							}
-						}
+						const CPosition ppos = GetPlugIn()->RadarTargetSelect(cs.c_str()).GetPosition().GetPosition();
+						string pposStr = SituPosition::FormatPositionString(ppos.m_Latitude, ppos.m_Longitude);
 						pposStr += " ";
 						string rtestr = GetPlugIn()->FlightPlanSelect(cs.c_str()).GetFlightPlanData().GetRoute();
 						auto itr = rtestr.find(c.c_str());
