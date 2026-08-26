@@ -61,8 +61,12 @@ FACILITY:NAT:NATX:SHANWICK AND GANDER RADIO
 FACILITY:EGGX:EGGX:SHANWICK RADIO
 FACILITY:BIRD:BIRD:REYKJAVIK CTL
 FACILITY:NY:KZNY:NEW YORK RADIO
-// Boston Center has no CPDLC station in this table and no fallback on purpose.
-// An unresolved BOS position is the right answer, not a gap to be filled.
+// Boston is the shared US domestic station rather than one of its own. Kept as a
+// facility fallback and not written out as LOGIN rows on purpose: the Boston
+// position identifiers in this package are 01, 02, 15, 17, 18, 37, 39, 45 and 46,
+// which are not distinctive enough to key a table that every facility shares. A
+// callsign prefix is.
+FACILITY:BOS:KUSA:BOSTON CTR
 
 [STATIONS]
 //Canada
