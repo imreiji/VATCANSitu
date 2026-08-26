@@ -4,6 +4,7 @@
 unsigned int CPDLCMessage::ids = 0;
 std::string CPDLCMessage::hoppieCode = "";
 std::string CPDLCMessage::hoppieICAO = "";
+std::string CPDLCMessage::cpdlcServer = "https://www.hoppie.nl/acars/system/connect.html";
 bool CPDLCMessage::firstPeek = true;
 
 std::string CPDLCMessage::YYMMDDString() {
@@ -208,7 +209,7 @@ std::string CPDLCMessage::PollCPDLCMessages() { // Returns raw string of CPDLC m
 	// readable by anything on the network path and recorded by any intermediary that logs
 	// request lines. The endpoint serves https with a valid certificate.
 	std::string url;
-	url = "https://www.hoppie.nl/acars/system/connect.html?logon=" + SituUrl::Encode(CPDLCMessage::hoppieCode)
+	url = CPDLCMessage::cpdlcServer + "?logon=" + SituUrl::Encode(CPDLCMessage::hoppieCode)
 		+ "&from=" + SituUrl::Encode(CPDLCMessage::hoppieICAO) + "&to=SERVER";
 
 	if (CPDLCMessage::firstPeek) {
@@ -228,7 +229,7 @@ std::string CPDLCMessage::PollCPDLCMessages() { // Returns raw string of CPDLC m
 void CPDLCMessage::SendCPDLCMessage() {
 
 	// https, and every value percent-encoded - see PollCPDLCMessages and SituUrl::Encode.
-	const std::string url = "https://www.hoppie.nl/acars/system/connect.html";
+	const std::string url = CPDLCMessage::cpdlcServer;
 
 	std::string postfields = "logon=";
 	postfields += SituUrl::Encode(this->hoppieCode);

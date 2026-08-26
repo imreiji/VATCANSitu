@@ -367,3 +367,6 @@ FodyWeavers.xsd
 
 # Build outputs from the standalone scratchpad tests
 testbin/
+
+# Per-controller Hoppie credential; never shipped or committed.
+SituLocal.txt

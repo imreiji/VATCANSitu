@@ -20,6 +20,11 @@ private:
 public:
 	static std::string hoppieCode;  // Hoppie Logon Code
 	static std::string hoppieICAO;
+
+	// Where CPDLC is sent. Settable so the plugin can be pointed at a local
+	// distributor holding one Hoppie connection for a whole sector, rather than every
+	// controller holding their own. TopSky exposes the same seam as CPDLC_Server.
+	static std::string cpdlcServer;
 	static unsigned int CPDLCMessage::ids;
 	static bool firstPeek; //
 

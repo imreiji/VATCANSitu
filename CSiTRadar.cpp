@@ -156,113 +156,93 @@ CSiTRadar::CSiTRadar()
 			}
 		}
 
-		// Absolute, so the settings are read from the same place they were written to.
-		// The old ".\situWx\settings.json" resolved against EuroScope's working directory,
-		// which moves whenever a file dialog is used.
-		const std::string situWxSettings = wxRadar::getSituWxDir() + "settings.json";
+		// Settings live beside the DLL, resolved against the module rather than the
+		// process working directory. ".\situWx\" resolved against EuroScope's, and any
+		// file dialog moves that, which is how these folders ended up scattered.
+		const std::string settingsPath = wxRadar::getSituWxDir() + "settings.txt";
+		const std::string localPath = wxRadar::getSituWxDir() + "SituLocal.txt";
+		const std::string legacyPath = wxRadar::getSituWxDir() + "settings.json";
 
-		std::ifstream settings_file(situWxSettings.c_str());
-		if (settings_file.is_open()) {
-			json j = json::parse(settings_file);
+		SituSettings::Settings settings;
+		SituSettings::LocalSettings local;
+		bool migratedFromJson = false;
 
-			wxRadar::wxLatCtr = j["wxlat"];
-			wxRadar::wxLongCtr = j["wxlong"];
-
-			// List positions are offsets from the top left of the radar area. A file
-			// written before that change stores absolute screen coordinates under the
-			// old key names, so read those instead and convert on the first draw, when
-			// the radar area is known. Reading an old absolute value as an offset would
-			// move every list by the radar area origin.
-			//
-			// Each list is guarded on its own: a settings file predating any one of them
-			// has no such key, and an unguarded read throws and abandons every setting
-			// below it - which is how the message list key broke this block before.
-			const auto readListPosition = [&j](ACList& list, const char* offsetKey, const char* absoluteKey) {
-				if (!j[offsetKey].is_null()) {
-					list.offset.x = j[offsetKey]["x"];
-					list.offset.y = j[offsetKey]["y"];
-					list.offsetIsAbsolute = false;
-				}
-				else if (!j[absoluteKey].is_null()) {
-					list.offset.x = j[absoluteKey]["x"];
-					list.offset.y = j[absoluteKey]["y"];
-					list.offsetIsAbsolute = true;
-				}
-			};
-
-			readListPosition(acLists[LIST_TIME_ATIS], "atisListOffset", "atisList");
-			readListPosition(acLists[LIST_OFF_SCREEN], "offScreenListOffset", "offScreenList");
-			readListPosition(acLists[LIST_MESSAGES], "messageListOffset", "messageList");
-
-			menuState.numHistoryDots = j["menuState"]["numHistoryDots"];
-			menuState.bigACID = j["menuState"]["bigACID"];
-			menuState.wxAll = j["menuState"]["wxAll"];
-			menuState.filterBypassAll = j["menuState"]["filterBypassAll"];
-			menuState.extAltToggle = j["menuState"]["extAltToggle"];
-
-			// Guarded like the other late additions - a settings file predating CPDLC has
-			// neither key, and an unguarded read throws and abandons the rest of the load.
-			if (!j["hoppieCode"].is_null()) {
-				CPDLCMessage::hoppieCode = j["hoppieCode"];
-			}
-			// Upstream persists only the logon code, so the centre had to be retyped every
-			// session. It is a per-position setting like any other; keep it.
-			if (!j["hoppieICAO"].is_null()) {
-				CPDLCMessage::hoppieICAO = j["hoppieICAO"];
-			}
-
-			if (!j["prefSFI"].is_null()) {
-				menuState.SFIPrefStringDefault = j["prefSFI"];
-			}
-			if (!j["ctrlRemarks"].is_null()) {
-				for (int i = 0; i < 7; i++) {
-					menuState.ctrlRemarkDefaults[i] = j["ctrlRemarks"][i];
-				}
-			}
-
+		if (SituFiles::Exists(settingsPath)) {
+			settings = SituSettings::Parse(SituConfig::Parse(SituFiles::Read(settingsPath)));
 		}
-		// write defaults if no file
-		else {
-			// The folder may not exist yet - the weather path is what usually creates it.
-			CreateDirectoryA(wxRadar::getSituWxDir().c_str(), NULL);
-			std::ofstream settings_file(situWxSettings.c_str());
+		else if (SituFiles::Exists(legacyPath)) {
+			// One time migration, and the last time this file is read at all.
+			//
+			// json::parse throws json::parse_error, which does not derive from
+			// ifstream::failure - the type the old code caught - so a malformed file threw
+			// out of this constructor, which EuroScope calls from OnRadarScreenCreated. An
+			// exception leaving an SDK callback unwinds through frames built by another
+			// compiler in a separately linked binary. Caught by base type here.
+			try {
+				settings = SituLegacy::SettingsFromJson(SituFiles::Read(legacyPath), local);
+				migratedFromJson = true;
+			}
+			catch (const std::exception&) {
+				GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings",
+					"settings.json could not be read; starting from defaults",
+					true, true, false, false, false);
+			}
+		}
 
-			json j;
-			j["wxlat"] = wxRadar::wxLatCtr;
-			j["wxlong"] = wxRadar::wxLongCtr;
+		if (SituFiles::Exists(localPath)) {
+			local = SituSettings::ParseLocal(SituConfig::Parse(SituFiles::Read(localPath)));
+		}
 
-			// Written under new key names so an older build reading this file falls back
-			// to its own defaults rather than treating an offset as a screen position.
-			j["atisListOffset"]["x"] = acLists[LIST_TIME_ATIS].offset.x;
-			j["atisListOffset"]["y"] = acLists[LIST_TIME_ATIS].offset.y;
+		wxRadar::wxLatCtr = settings.wxLat;
+		wxRadar::wxLongCtr = settings.wxLong;
 
-			j["offScreenListOffset"]["x"] = acLists[LIST_OFF_SCREEN].offset.x;
-			j["offScreenListOffset"]["y"] = acLists[LIST_OFF_SCREEN].offset.y;
+		acLists[LIST_TIME_ATIS].offset = { settings.atisListOffset.x, settings.atisListOffset.y };
+		acLists[LIST_OFF_SCREEN].offset = { settings.offScreenListOffset.x, settings.offScreenListOffset.y };
+		acLists[LIST_MESSAGES].offset = { settings.messageListOffset.x, settings.messageListOffset.y };
 
-			j["messageListOffset"]["x"] = acLists[LIST_MESSAGES].offset.x;
-			j["messageListOffset"]["y"] = acLists[LIST_MESSAGES].offset.y;
+		menuState.numHistoryDots = settings.historyDots;
+		menuState.bigACID = settings.bigACID;
+		menuState.wxAll = settings.wxAll;
+		menuState.filterBypassAll = settings.filterBypassAll;
+		menuState.extAltToggle = settings.extAltToggle;
+		menuState.SFIPrefStringDefault = settings.prefSFI;
 
-			j["hoppieCode"] = CPDLCMessage::hoppieCode;
-			j["hoppieICAO"] = CPDLCMessage::hoppieICAO;
+		for (size_t i = 0; i < menuState.ctrlRemarkDefaults.size() && i < settings.controllerRemarks.size(); i++) {
+			menuState.ctrlRemarkDefaults[i] = settings.controllerRemarks[i];
+		}
 
-			j["prefSFI"] = menuState.SFIPrefStringDefault;
+		CPDLCMessage::cpdlcServer = settings.cpdlcServer;
+		CPDLCMessage::hoppieCode = local.hoppieCode;
+		CPDLCMessage::hoppieICAO = local.hoppieICAO;
 
-			j["ctrlRemarks"] = menuState.ctrlRemarkDefaults;
+		// Say what was thrown away rather than dropping it quietly.
+		const size_t badLines = settings.skippedLines.size() + local.skippedLines.size();
+		if (badLines != 0) {
+			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings",
+				(std::to_string(badLines) + " settings line(s) not understood and ignored").c_str(),
+				true, true, false, false, false);
+		}
 
-			j["menuState"]["numHistoryDots"] = menuState.numHistoryDots;
-			j["menuState"]["bigACID"] = menuState.bigACID;
-			j["menuState"]["wxAll"] = menuState.wxAll;
-			j["menuState"]["filterBypassAll"] = menuState.filterBypassAll;
-			j["menuState"]["extAltToggle"] = menuState.extAltToggle;
-
-
-			settings_file << j;
+		if (migratedFromJson) {
+			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings",
+				"settings.json migrated to settings.txt; the logon code moved to SituLocal.txt",
+				true, true, false, false, false);
 		}
 	}
-	catch (std::ifstream::failure e) {
-
-	};
-
+	catch (const std::exception& e) {
+		// Nothing above should throw: the tokeniser and the settings parsers do not, and
+		// the one remaining JSON read carries its own handler. This is the backstop.
+		//
+		// It catches std::exception rather than std::ifstream::failure, which is what was
+		// here before and is a type that neither json::parse_error nor json::type_error
+		// derives from - so the handler that looked like it covered this never did. A
+		// constructor called from OnRadarScreenCreated must not let anything out: an
+		// exception leaving an SDK callback unwinds through frames built by a different
+		// compiler in a separately linked binary.
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings",
+			(string("settings load failed: ") + e.what()).c_str(),
+			true, true, false, false, false);
+	}
 
 	try {
 		if ( (((clock() - menuState.lastWxRefresh) / CLOCKS_PER_SEC) > 600 && (menuState.wxAll || menuState.wxHigh)) ||
@@ -303,49 +283,43 @@ CSiTRadar::CSiTRadar()
 
 CSiTRadar::~CSiTRadar()
 {
-	// Save settings file
-	try {
+	// Save settings. Written every time rather than only when a file already existed:
+	// the old code opened the file for reading first and skipped the whole save if that
+	// failed, so a fresh install never persisted anything at all.
+	SituSettings::Settings settings;
+	settings.wxLat = wxRadar::wxLatCtr;
+	settings.wxLong = wxRadar::wxLongCtr;
 
-		const std::string situWxSettings = wxRadar::getSituWxDir() + "settings.json";
+	settings.atisListOffset = { acLists[LIST_TIME_ATIS].offset.x, acLists[LIST_TIME_ATIS].offset.y };
+	settings.offScreenListOffset = { acLists[LIST_OFF_SCREEN].offset.x, acLists[LIST_OFF_SCREEN].offset.y };
+	settings.messageListOffset = { acLists[LIST_MESSAGES].offset.x, acLists[LIST_MESSAGES].offset.y };
 
-		std::ifstream settings_file(situWxSettings.c_str());
-		if (settings_file.is_open()) {
-			std::ofstream settings_file(situWxSettings.c_str());
+	settings.historyDots = menuState.numHistoryDots;
+	settings.bigACID = menuState.bigACID;
+	settings.wxAll = menuState.wxAll;
+	settings.filterBypassAll = menuState.filterBypassAll;
+	settings.extAltToggle = menuState.extAltToggle;
+	settings.prefSFI = menuState.SFIPrefStringDefault;
+	settings.cpdlcServer = CPDLCMessage::cpdlcServer;
 
-			json j;
-			j["wxlat"] = wxRadar::wxLatCtr;
-			j["wxlong"] = wxRadar::wxLongCtr;
-
-			// Written under new key names so an older build reading this file falls back
-			// to its own defaults rather than treating an offset as a screen position.
-			j["atisListOffset"]["x"] = acLists[LIST_TIME_ATIS].offset.x;
-			j["atisListOffset"]["y"] = acLists[LIST_TIME_ATIS].offset.y;
-
-			j["offScreenListOffset"]["x"] = acLists[LIST_OFF_SCREEN].offset.x;
-			j["offScreenListOffset"]["y"] = acLists[LIST_OFF_SCREEN].offset.y;
-
-			j["messageListOffset"]["x"] = acLists[LIST_MESSAGES].offset.x;
-			j["messageListOffset"]["y"] = acLists[LIST_MESSAGES].offset.y;
-
-			j["hoppieCode"] = CPDLCMessage::hoppieCode;
-			j["hoppieICAO"] = CPDLCMessage::hoppieICAO;
-
-			j["prefSFI"] = menuState.SFIPrefStringDefault;
-
-			j["ctrlRemarks"] = menuState.ctrlRemarkDefaults;
-
-			j["menuState"]["numHistoryDots"] = menuState.numHistoryDots;
-			j["menuState"]["bigACID"] = menuState.bigACID;
-			j["menuState"]["wxAll"] = menuState.wxAll;
-			j["menuState"]["filterBypassAll"] = menuState.filterBypassAll;
-			j["menuState"]["extAltToggle"] = menuState.extAltToggle;
-
-			settings_file << j;
-		}
+	for (size_t i = 0; i < settings.controllerRemarks.size() && i < menuState.ctrlRemarkDefaults.size(); i++) {
+		settings.controllerRemarks[i] = menuState.ctrlRemarkDefaults[i];
 	}
-	catch (std::ifstream::failure e) {
 
-	};
+	SituSettings::LocalSettings local;
+	local.hoppieCode = CPDLCMessage::hoppieCode;
+	local.hoppieICAO = CPDLCMessage::hoppieICAO;
+
+	// The folder may not exist yet; the weather path is what usually creates it.
+	CreateDirectoryA(wxRadar::getSituWxDir().c_str(), NULL);
+
+	SituFiles::Write(wxRadar::getSituWxDir() + "settings.txt", SituSettings::Serialize(settings));
+
+	// Only written once there is something to write, so an install that has never used
+	// CPDLC does not grow a file whose only purpose is to hold a credential.
+	if (!local.hoppieCode.empty() || !local.hoppieICAO.empty()) {
+		SituFiles::Write(wxRadar::getSituWxDir() + "SituLocal.txt", SituSettings::SerializeLocal(local));
+	}
 
 	m_pRadScr = nullptr;
 }
