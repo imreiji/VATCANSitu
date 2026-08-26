@@ -48,6 +48,12 @@ const int TAG_ALT = 403;
 const int TAG_CPDLC = 404;
 const int TAG_CPDLC_MNEMONIC = 405;
 
+// Tag item and tag function registered with EuroScope, so the CPDLC window can be opened
+// from a tag. The IFR release equivalents are declared at the top of SituPlugin.cpp
+// rather than here.
+const int TAG_ITEM_CPDLC = 4999;
+const int TAG_FUNCTION_OPEN_CPDLC_WINDOW = 5003;
+
 const int BUTTON_MENU = 201;
 const int BUTTON_MENU_HALO_OPTIONS = 202;
 const int BUTTON_MENU_ALT_FILT_OPT = 203;

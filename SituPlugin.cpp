@@ -630,8 +630,10 @@ SituPlugin::SituPlugin()
 		"Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)")
 {
     RegisterTagItemType("IFR Release", TAG_ITEM_IFR_REL);
+    RegisterTagItemType("CPDLC State", TAG_ITEM_CPDLC);
     RegisterTagItemFunction("Request IFR Release", TAG_FUNC_IFR_REL_REQ);
     RegisterTagItemFunction("Grant IFR Release", TAG_FUNC_IFR_RELEASED);
+    RegisterTagItemFunction("Open CPDLC Menu", TAG_FUNCTION_OPEN_CPDLC_WINDOW);
 
     DWORD appProc = GetCurrentThreadId();
     appHook = SetWindowsHookEx(WH_KEYBOARD, KeyboardProc, NULL, appProc);
@@ -692,6 +694,21 @@ void SituPlugin::OnGetTagItem(EuroScopePlugIn::CFlightPlan FlightPlan,
         }
     }
 
+    if (ItemCode == TAG_ITEM_CPDLC) {
+
+        // Marks aircraft that have exchanged CPDLC at all, so the tag function is
+        // discoverable on the ones it applies to. find rather than at or operator[]:
+        // this is polled for every drawn tag, and operator[] would insert an entry for
+        // every aircraft on the scope into a map that is garbage collected on the
+        // assumption it only holds ones we have actually seen.
+        const auto entry = CSiTRadar::mAcData.find(FlightPlan.GetCallsign());
+        if (entry != CSiTRadar::mAcData.end() && !entry->second.CPDLCMessages.empty()) {
+            *pColorCode = TAG_COLOR_RGB_DEFINED;
+            strcpy_s(sItemString, 16, "\u00A4");
+            *pRGB = C_CPDLC_GREEN;
+        }
+    }
+
 }
 
 inline void SituPlugin::OnFunctionCall(int FunctionId, const char* sItemString, POINT Pt, RECT Area)
@@ -699,6 +716,41 @@ inline void SituPlugin::OnFunctionCall(int FunctionId, const char* sItemString, 
     CFlightPlan fp;
     fp = FlightPlanSelectASEL();
     string spString = fp.GetControllerAssignedData().GetScratchPadString();
+
+    if (FunctionId == TAG_FUNCTION_OPEN_CPDLC_WINDOW) {
+
+        // Nothing to open a window against, and GetCallsign on an invalid plan has
+        // nothing meaningful to return.
+        if (!fp.IsValid()) { return; }
+
+        const string callsign = fp.GetCallsign();
+
+        // Bring an already open window for this aircraft to the click instead of
+        // stacking a second one on top of it.
+        for (auto& win : CSiTRadar::menuState.radarScrWindows) {
+            if (win.second.m_winType == WINDOW_CPDLC && win.second.m_callsign == callsign) {
+                win.second.m_origin = { Pt.x, Pt.y };
+                if (CSiTRadar::m_pRadScr != nullptr) { CSiTRadar::m_pRadScr->RequestRefresh(); }
+                return;
+            }
+        }
+
+        // No radar screen means no radar area to place the window inside.
+        if (CSiTRadar::m_pRadScr == nullptr) { return; }
+
+        // operator[] rather than at: an aircraft that has never been drawn is not in
+        // mAcData yet, and at would throw out of a EuroScope callback. The window is
+        // opened against an empty message list in that case, which is correct - there
+        // is no CPDLC history to show.
+        CAppWindows cpdlc({ Pt.x, Pt.y }, WINDOW_CPDLC, fp,
+            CSiTRadar::m_pRadScr->GetRadarArea(),
+            CSiTRadar::mAcData[callsign].CPDLCMessages);
+        cpdlc.m_callsign = callsign;
+        CSiTRadar::menuState.radarScrWindows[cpdlc.m_windowId_] = cpdlc;
+
+        CSiTRadar::m_pRadScr->RequestRefresh();
+        return;
+    }
 
     // Toggle: an outstanding request or an existing grant both clear.
     //
