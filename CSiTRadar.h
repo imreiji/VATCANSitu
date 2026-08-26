@@ -13,6 +13,7 @@
 #include <deque>
 #include "constants.h"
 #include "Scratchpad.h"
+#include "cpdlc.h"
 #include "wxRadar.h"
 #include "CAsyncResponse.h"
 #include <future>
@@ -72,6 +73,12 @@ struct ACData {
     // was read but never written, leaving its guard permanently false.
     bool autoCorrelationCleared{ false };
     int follower{ 1 }; // 0 is light, 1 is med, 2 heavy, 3 super
+
+    // CPDLC. Messages exchanged with this aircraft, whether an unread downlink should
+    // raise the mnemonic on the tag, and the logon state (0 not connected, 1 connected).
+    vector<CPDLCMessage> CPDLCMessages;
+    bool cpdlcMnemonic{ false };
+    int cpdlcState{ 0 };
 };
 
 // Identifies the focused text field by ID rather than by address.
@@ -147,9 +154,12 @@ struct buttonStates {
     map<string, string> arptAltimeterOld;
     map<string, string> arptAtisLetterOld;
 
+    bool CPDLCOn{ false };
+
     clock_t lastWxRefresh = 0;
     clock_t lastMetarRefresh = 0;
     clock_t lastAtisRefresh = 0;
+    clock_t lastCPDLCPoll = 0;
 
     bool bgM3Click{ false };
     bool mouseMMB{ false };
@@ -226,6 +236,30 @@ public:
     static void DisplayActiveRunways();
     inline virtual void OnControllerPositionUpdate(CController Controller);
     inline virtual void OnControllerDisconnect(CController Controller);
+    // CPDLC downlink handoff.
+    //
+    // Upstream calls this work directly from OnRefresh, under the name asyncCPDLCFetch,
+    // so a slow Hoppie stalls drawing for the length of the curl timeout. It can run on a
+    // worker instead because cpdlc.cpp touches no EuroScope SDK - the only SDK reference
+    // in that file is MakePDCMessage, which takes its CFlightPlan and CController as
+    // parameters. So the thread polls and parses into the struct below, and the main
+    // thread attaches the results to mAcData in DrainCPDLCPoll.
+    struct SCPDLCPollResult {
+        std::vector<CPDLCMessage> messages;
+        std::string error;
+        bool ready{ false };
+    };
+
+    static SCPDLCPollResult cpdlcPollResult;
+    static std::mutex cpdlcPollMutex;
+    static bool cpdlcPollInFlight;
+
+    // Kicks off a poll if one is not already running. Returns immediately.
+    static void StartCPDLCPoll();
+
+    // Main thread only. Applies whatever the last poll produced.
+    void DrainCPDLCPoll();
+
     static CAppWindows* GetAppWindow(int winID);
 
     // Resolves the "<windowId> <function>" screen-object id prefix to an open window.
