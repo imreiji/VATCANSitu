@@ -16,6 +16,78 @@ unordered_map<int, ACList> acLists;
 unordered_map<string, bool> CSiTRadar::acADSB;
 unordered_map<string, bool> CSiTRadar::acRVSM;
 std::shared_mutex CSiTRadar::acCapabilityMutex;
+CSiTRadar::SCPDLCPollResult CSiTRadar::cpdlcPollResult;
+std::mutex CSiTRadar::cpdlcPollMutex;
+bool CSiTRadar::cpdlcPollInFlight = false;
+
+void CSiTRadar::StartCPDLCPoll()
+{
+	{
+		std::lock_guard<std::mutex> lock(cpdlcPollMutex);
+		if (cpdlcPollInFlight) { return; }
+		cpdlcPollInFlight = true;
+	}
+
+	std::thread poll([]() {
+		std::string raw = CPDLCMessage::PollCPDLCMessages();
+
+		SCPDLCPollResult result;
+
+		if (raw.compare(0, 2, "ok") != 0) {
+			result.error = "Hoppie Error, Try Reconnecting Error:" + raw;
+		}
+		else if (raw.compare(0, 3, "ok ") == 0) {
+			// parseDLMessage consumes from the front of raw, and now always shortens it,
+			// so this terminates even on a malformed reply.
+			while (raw.length() > 4) {
+				result.messages.push_back(CPDLCMessage::parseDLMessage(raw));
+			}
+		}
+
+		result.ready = true;
+
+		std::lock_guard<std::mutex> lock(cpdlcPollMutex);
+		cpdlcPollResult = result;
+		cpdlcPollInFlight = false;
+		});
+
+	poll.detach();
+}
+
+void CSiTRadar::DrainCPDLCPoll()
+{
+	SCPDLCPollResult result;
+
+	{
+		std::lock_guard<std::mutex> lock(cpdlcPollMutex);
+		if (!cpdlcPollResult.ready) { return; }
+		result.messages.swap(cpdlcPollResult.messages);
+		result.error.swap(cpdlcPollResult.error);
+		cpdlcPollResult.ready = false;
+	}
+
+	// Everything below touches the EuroScope SDK or mAcData, so it only runs here.
+	if (!result.error.empty()) {
+		menuState.CPDLCOn = false;
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Hoppie CPDLC", result.error.c_str(),
+			true, false, false, false, false);
+		return;
+	}
+
+	for (auto& message : result.messages) {
+		auto aircraft = mAcData.find(message.sender);
+		if (aircraft == mAcData.end()) { continue; }
+
+		aircraft->second.CPDLCMessages.push_back(message);
+
+		if (message.opensMnemonic) {
+			aircraft->second.cpdlcMnemonic = true;
+		}
+		if (message.rawMessageContent == "LOGOFF") {
+			aircraft->second.cpdlcState = 0;
+		}
+	}
+}
 
 CSiTRadar::CSiTRadar()
 {
@@ -82,6 +154,17 @@ CSiTRadar::CSiTRadar()
 			menuState.filterBypassAll = j["menuState"]["filterBypassAll"];
 			menuState.extAltToggle = j["menuState"]["extAltToggle"];
 
+			// Guarded like the other late additions - a settings file predating CPDLC has
+			// neither key, and an unguarded read throws and abandons the rest of the load.
+			if (!j["hoppieCode"].is_null()) {
+				CPDLCMessage::hoppieCode = j["hoppieCode"];
+			}
+			// Upstream persists only the logon code, so the centre had to be retyped every
+			// session. It is a per-position setting like any other; keep it.
+			if (!j["hoppieICAO"].is_null()) {
+				CPDLCMessage::hoppieICAO = j["hoppieICAO"];
+			}
+
 			if (!j["prefSFI"].is_null()) {
 				menuState.SFIPrefStringDefault = j["prefSFI"];
 			}
@@ -110,6 +193,9 @@ CSiTRadar::CSiTRadar()
 
 			j["messageList"]["x"] = acLists[LIST_MESSAGES].p.x;
 			j["messageList"]["y"] = acLists[LIST_MESSAGES].p.y;
+
+			j["hoppieCode"] = CPDLCMessage::hoppieCode;
+			j["hoppieICAO"] = CPDLCMessage::hoppieICAO;
 
 			j["prefSFI"] = menuState.SFIPrefStringDefault;
 
@@ -190,6 +276,9 @@ CSiTRadar::~CSiTRadar()
 
 			j["messageList"]["x"] = acLists[LIST_MESSAGES].p.x;
 			j["messageList"]["y"] = acLists[LIST_MESSAGES].p.y;
+
+			j["hoppieCode"] = CPDLCMessage::hoppieCode;
+			j["hoppieICAO"] = CPDLCMessage::hoppieICAO;
 
 			j["prefSFI"] = menuState.SFIPrefStringDefault;
 
@@ -275,6 +364,15 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 			wxRadar::parseRadarPNG(this);
 			menuState.lastWxRefresh = clock();
 		}
+
+		// Kick off a Hoppie poll about once a minute. StartCPDLCPoll returns immediately;
+		// DrainCPDLCPoll below picks the results up on a later refresh.
+		if (menuState.CPDLCOn && ((clock() - menuState.lastCPDLCPoll) / CLOCKS_PER_SEC) > 60) {
+			StartCPDLCPoll();
+			menuState.lastCPDLCPoll = clock();
+		}
+
+		DrainCPDLCPoll();
 
 		if (((clock() - menuState.lastMetarRefresh) / CLOCKS_PER_SEC) > 600) { // update METAR every 10 mins
 			std::thread tc(wxRadar::parseVatsimMetar, 0);
