@@ -179,3 +179,12 @@ const int CPDLC_ROW_HEIGHT = 17;
 
 // How much of a message body fits on one row before it is truncated with a chevron.
 const int CPDLC_ROW_TEXT_CHARS = 25;
+
+// CPDLC connection state, held per aircraft in ACData::cpdlcState.
+//
+// It existed as an int written to zero in two places and read nowhere. These are what it
+// means now: an aircraft that has asked to log on is distinguishable from one that never
+// has, which is the difference between the Connect button being worth pressing and not.
+const int CPDLC_NOT_CONNECTED = 0;
+const int CPDLC_CONNECTED = 1;
+const int CPDLC_LOGON_REQUESTED = 2;

@@ -83,6 +83,8 @@ jobs:
         testbin\CpdlcStationsTests.exe || exit /b 1
         cl /nologo /EHsc /W4 /std:c++17 tests\CpdlcDclTests.cpp /Fe:testbin\CpdlcDclTests.exe /Fo:testbin\ || exit /b 1
         testbin\CpdlcDclTests.exe || exit /b 1
+        cl /nologo /EHsc /W4 /std:c++17 tests\CpdlcFreetextTests.cpp /Fe:testbin\CpdlcFreetextTests.exe /Fo:testbin\ || exit /b 1
+        testbin\CpdlcFreetextTests.exe || exit /b 1
 
     - name: Build artifact from source
       run: msbuild "${env:GITHUB_WORKSPACE}\VATCANSitu.vcxproj"

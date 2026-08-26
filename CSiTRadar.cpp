@@ -15,6 +15,7 @@ CRadarScreen* CSiTRadar::m_pRadScr;
 unordered_map<int, ACList> acLists;
 SituTbs::Config CSiTRadar::tbsConfig;
 SituCpdlcStations::Table CSiTRadar::cpdlcStations;
+SituCpdlcFreetext::Table CSiTRadar::cpdlcFreetext;
 unordered_map<string, bool> CSiTRadar::acADSB;
 unordered_map<string, bool> CSiTRadar::acRVSM;
 std::shared_mutex CSiTRadar::acCapabilityMutex;
@@ -94,8 +95,17 @@ void CSiTRadar::DrainCPDLCPoll()
 		if (message.opensMnemonic) {
 			aircraft->second.cpdlcMnemonic = true;
 		}
-		if (message.rawMessageContent == "LOGOFF") {
-			aircraft->second.cpdlcState = 0;
+		// Connection state. REQUEST LOGON is how an aircraft asks; LOGOFF is how it
+		// leaves. Until now this field was written to zero in one place and read
+		// nowhere, so the window could not tell an aircraft that had asked to connect
+		// from one that never had.
+		if (message.rawMessageContent == "REQUEST LOGON") {
+			if (aircraft->second.cpdlcState != CPDLC_CONNECTED) {
+				aircraft->second.cpdlcState = CPDLC_LOGON_REQUESTED;
+			}
+		}
+		else if (message.rawMessageContent == "LOGOFF") {
+			aircraft->second.cpdlcState = CPDLC_NOT_CONNECTED;
 		}
 	}
 }
@@ -165,6 +175,7 @@ CSiTRadar::CSiTRadar()
 				const SituConfig::ParseResult cpdlcParsed = SituConfig::Parse(SituFiles::Read(cpdlcPath));
 				cpdlcStations = SituCpdlcStations::Parse(cpdlcParsed);
 				CPDLCMessage::dclTable = SituCpdlcDcl::Parse(cpdlcParsed);
+				cpdlcFreetext = SituCpdlcFreetext::Parse(cpdlcParsed);
 
 				if (!cpdlcStations.skippedLines.empty()) {
 					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
@@ -2111,6 +2122,188 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 	dc.Detach();
 }
 
+// A blank uplink addressed to an aircraft, with its identifier allocated.
+//
+// The real MIN range is 0 to 63; Hoppie allows more, so the counter is kept whole and
+// only the value on the wire rolls over.
+CPDLCMessage CSiTRadar::NewCPDLCUplink(const std::string& callsign)
+{
+	CPDLCMessage uplink;
+	uplink.isdlMessage = false;
+	uplink.messageType = "cpdlc";
+	uplink.receipient = callsign;
+	uplink.sender = CPDLCMessage::hoppieICAO;
+	uplink.timeParsed = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+	uplink.messageID = (int)(CPDLCMessage::ids++ % 64);
+	return uplink;
+}
+
+// Sends on a worker and records the message against the aircraft.
+//
+// cpdlc.cpp touches no EuroScope SDK, which is what makes moving the send off this
+// thread safe. The copy is deliberate: the worker outlives this call.
+void CSiTRadar::DispatchCPDLCUplink(CPDLCMessage uplink, const std::string& callsign)
+{
+	const std::string preview = uplink.rawMessageContent;
+
+	std::thread send([uplink]() mutable { uplink.SendCPDLCMessage(); });
+	send.detach();
+
+	mAcData[callsign].CPDLCMessages.push_back(uplink);
+
+	GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+		(callsign + ": " + preview).c_str(), true, true, false, false, false);
+
+	RequestRefresh();
+}
+
+// The most recent downlink still waiting on an answer. A reply button means "answer what
+// I am looking at", and this is what that is when nothing has been selected explicitly.
+CPDLCMessage* CSiTRadar::LatestOpenDownlink(const std::string& callsign)
+{
+	auto aircraft = mAcData.find(callsign);
+	if (aircraft == mAcData.end()) { return nullptr; }
+
+	std::vector<CPDLCMessage>& messages = aircraft->second.CPDLCMessages;
+
+	for (size_t i = messages.size(); i > 0; --i)
+	{
+		CPDLCMessage& candidate = messages[i - 1];
+		if (!candidate.isdlMessage) { continue; }
+		if (candidate.messageID == -1) { continue; }
+		if (candidate.responseRequired != "Y") { continue; }
+
+		// Answered already if anything references it.
+		bool answered = false;
+		for (const CPDLCMessage& other : messages)
+		{
+			if (other.responseToMessageID == candidate.messageID) { answered = true; break; }
+		}
+		if (!answered) { return &candidate; }
+	}
+	return nullptr;
+}
+
+// Accepts an aircraft's logon request.
+//
+// Hoppie's protocol for this is two plain text messages and nothing more: the aircraft
+// sends REQUEST LOGON, the station answers LOGON ACCEPTED.
+void CSiTRadar::AcceptCPDLCLogon(const std::string& callsign)
+{
+	if (mAcData[callsign].cpdlcState == CPDLC_CONNECTED) {
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+			(callsign + ": already connected").c_str(), true, true, false, false, false);
+		return;
+	}
+
+	CPDLCMessage uplink = NewCPDLCUplink(callsign);
+	uplink.responseRequired = "NE";
+	uplink.rawMessageContent = "LOGON ACCEPTED";
+
+	// Answer the request itself where there is one, so the two are paired in the list
+	// rather than sitting there as two unrelated lines.
+	CPDLCMessage* request = LatestOpenDownlink(callsign);
+	if (request != nullptr && request->rawMessageContent == "REQUEST LOGON") {
+		uplink.responseToMessageID = request->messageID;
+	}
+
+	mAcData[callsign].cpdlcState = CPDLC_CONNECTED;
+	DispatchCPDLCUplink(uplink, callsign);
+}
+
+// Ends the CPDLC service for an aircraft.
+//
+// The wording comes from the [FREETEXT] entry marked UNICOM when the file has one, which
+// is where a unit puts what it wants said - CZQM's reads "SERVICES TERMINATED - MNT
+// UNICOM 122.8". Falling back to a plain phrase rather than refusing, because ending a
+// service must not depend on a config file having the row.
+void CSiTRadar::EndCPDLCService(const std::string& callsign)
+{
+	if (mAcData[callsign].cpdlcState != CPDLC_CONNECTED) {
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+			(callsign + ": not connected").c_str(), true, true, false, false, false);
+		return;
+	}
+
+	std::string text = "CPDLC SERVICE TERMINATED";
+	std::string reply = "NE";
+
+	for (const SituCpdlcFreetext::Entry& entry : cpdlcFreetext.entries) {
+		if (!entry.terminatesService) { continue; }
+		text = entry.text;
+		reply = entry.replyType;
+		break;
+	}
+
+	CPDLCMessage uplink = NewCPDLCUplink(callsign);
+	uplink.responseRequired = reply;
+	uplink.rawMessageContent = text;
+
+	mAcData[callsign].cpdlcState = CPDLC_NOT_CONNECTED;
+	mAcData[callsign].cpdlcMnemonic = false;
+	DispatchCPDLCUplink(uplink, callsign);
+}
+
+// Sends one of the canned messages, chosen by the button's label.
+//
+// The wording and the reply type both come from [FREETEXT] in SituCPDLC.txt rather than
+// from a table in here, so a unit that wants "APPROVED" instead of "ROGER" edits a file.
+void CSiTRadar::SendCPDLCFreetext(const std::string& callsign, const std::string& label)
+{
+	const SituCpdlcFreetext::Entry* entry = SituCpdlcFreetext::Find(cpdlcFreetext, label);
+	if (entry == nullptr) {
+		// A button with nothing behind it says so. Sending a message the controller did
+		// not choose, with a reply type nobody set, is the worse outcome.
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+			(label + ": no such message in SituCPDLC.txt [FREETEXT]").c_str(),
+			true, true, false, false, false);
+		return;
+	}
+
+	CPDLCMessage uplink = NewCPDLCUplink(callsign);
+	uplink.responseRequired = entry->replyType;
+	uplink.rawMessageContent = entry->text;
+
+	CPDLCMessage* answering = LatestOpenDownlink(callsign);
+	if (answering != nullptr) { uplink.responseToMessageID = answering->messageID; }
+
+	// The mnemonic marks an unread downlink. Answering one is what clears it.
+	if (answering != nullptr) { mAcData[callsign].cpdlcMnemonic = false; }
+
+	DispatchCPDLCUplink(uplink, callsign);
+}
+
+void CSiTRadar::CloseCPDLCEditor(const std::string& callsign)
+{
+	for (auto it = menuState.radarScrWindows.begin(); it != menuState.radarScrWindows.end(); ++it) {
+		if (it->second.m_winType == WINDOW_CPDLC_EDITOR && it->second.m_callsign == callsign) {
+			menuState.radarScrWindows.erase(it);
+			return;
+		}
+	}
+}
+
+void CSiTRadar::OpenCPDLCEditor(const std::string& callsign, POINT at)
+{
+	// One editor per aircraft. A second click moves the one that is open rather than
+	// stacking another on top of it.
+	for (auto& win : menuState.radarScrWindows) {
+		if (win.second.m_winType == WINDOW_CPDLC_EDITOR && win.second.m_callsign == callsign) {
+			win.second.m_origin = at;
+			return;
+		}
+	}
+
+	CFlightPlan fp = GetPlugIn()->FlightPlanSelect(callsign.c_str());
+	if (!fp.IsValid()) { return; }
+
+	// operator[] rather than at: an aircraft with no record yet would throw out of a
+	// EuroScope callback, and an empty message list is the right thing to show.
+	CAppWindows editor(at, WINDOW_CPDLC_EDITOR, fp, GetRadarArea(), mAcData[callsign].CPDLCMessages);
+	editor.m_callsign = callsign;
+	menuState.radarScrWindows[editor.m_windowId_] = editor;
+}
+
 // Composes and sends one of the manual CPDLC uplinks from the callsign menu.
 //
 // Everything it needs to know about the next controller comes from SituCPDLC.txt and
@@ -2149,13 +2342,7 @@ void CSiTRadar::SendCPDLCUplink(const std::string& which)
 	const SituCpdlcStations::Resolution next =
 		SituCpdlcStations::Resolve(cpdlcStations, nextPositionId, nextCallsign);
 
-	CPDLCMessage uplink;
-	uplink.isdlMessage = false;
-	uplink.messageType = "cpdlc";
-	uplink.receipient = callsign;
-	uplink.sender = CPDLCMessage::hoppieICAO;
-	uplink.timeParsed = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-	uplink.messageID = (int)(CPDLCMessage::ids++ % 64);
+	CPDLCMessage uplink = NewCPDLCUplink(callsign);
 
 	if (which == "CPDLCNDA") {
 		// Refuse rather than guess. A next data authority the far end is not listening
@@ -2196,18 +2383,7 @@ void CSiTRadar::SendCPDLCUplink(const std::string& which)
 		return;
 	}
 
-	// The network call blocks, so it does not belong on the thread that draws. cpdlc.cpp
-	// touches no EuroScope SDK, which is what makes moving it off safe.
-	const std::string preview = uplink.rawMessageContent;
-	std::thread send([uplink]() mutable { uplink.SendCPDLCMessage(); });
-	send.detach();
-
-	mAcData[callsign].CPDLCMessages.push_back(uplink);
-
-	GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-		(callsign + ": " + preview).c_str(), true, true, false, false, false);
-
-	RequestRefresh();
+	DispatchCPDLCUplink(uplink, callsign);
 }
 
 void CSiTRadar::OnClickScreenObject(int ObjectType,
@@ -2285,12 +2461,42 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 	}
 
 	if (ObjectType == WINDOW_CPDLC) {
+		auto window = GetAppWindowFromObjectId(id);
+		if (window == nullptr) { return; }
+
+		const std::string cs = window->m_callsign;
+
 		if (func == "Close") {
+			// The editor belongs to this window; closing the parent takes it with it.
+			CloseCPDLCEditor(cs);
 			menuState.radarScrWindows.erase(stoi(id));
-			RequestRefresh();
 		}
-		// The reply and category buttons are drawn but not wired up yet. Clicking one
-		// does nothing rather than doing something half defined.
+		else if (func == "Close Dialog") {
+			CloseCPDLCEditor(cs);
+		}
+		else if (func == "Connect") {
+			AcceptCPDLCLogon(cs);
+		}
+		else if (func == "End Service") {
+			EndCPDLCService(cs);
+		}
+		else if (func == "Flight Plan") {
+			CFlightPlan fp = GetPlugIn()->FlightPlanSelect(cs.c_str());
+			if (fp.IsValid()) {
+				CAppWindows fpWindow(Pt, WINDOW_FLIGHT_PLAN, fp, GetRadarArea());
+				fpWindow.m_callsign = cs;
+				menuState.radarScrWindows[fpWindow.m_windowId_] = fpWindow;
+			}
+		}
+		else if (!func.empty()) {
+			// A canned message, looked up by the button's own label. The category
+			// buttons - Altitude, Speed, Route and the rest - have no [FREETEXT] entry
+			// and no value picker behind them yet, so they report that rather than
+			// guessing at a message.
+			SendCPDLCFreetext(cs, func);
+		}
+
+		RequestRefresh();
 		return;
 	}
 
@@ -2506,7 +2712,22 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 		}
 		auto window = GetAppWindowFromObjectId(win);
 		if (window == nullptr) { return; }
-		
+
+		// A click in the CPDLC message list selects that message and opens the editor
+		// against it, which is what a reply button then answers. The generic selection
+		// below works on m_ListBoxElementText, which a CPDLC row does not use - its
+		// content is the message, not that string - so it is handled here instead.
+		if (window->m_winType == WINDOW_CPDLC) {
+			for (auto& lb : window->m_listboxes_) {
+				for (auto& lelem : lb.listBox_) {
+					lelem.m_selected_ = (lelem.m_elementID == stoi(le));
+				}
+			}
+			OpenCPDLCEditor(window->m_callsign, { Pt.x, Pt.y + 40 });
+			RequestRefresh();
+			return;
+		}
+
 		for (auto &lb : window->m_listboxes_) {
 			for (auto &lelem : lb.listBox_) {
 				if (lelem.m_elementID == stoi(le)) {
