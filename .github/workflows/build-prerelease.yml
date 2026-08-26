@@ -69,6 +69,8 @@ jobs:
         testbin\PositionStringTests.exe || exit /b 1
         cl /nologo /EHsc /W4 /std:c++17 tests\UrlEncodeTests.cpp /Fe:testbin\UrlEncodeTests.exe /Fo:testbin\ || exit /b 1
         testbin\UrlEncodeTests.exe || exit /b 1
+        cl /nologo /EHsc /W4 /std:c++17 tests\ConfigFileTests.cpp /Fe:testbin\ConfigFileTests.exe /Fo:testbin\ || exit /b 1
+        testbin\ConfigFileTests.exe || exit /b 1
 
     - name: Build artifact from source
       run: msbuild "${env:GITHUB_WORKSPACE}\VATCANSitu.vcxproj"
