@@ -79,6 +79,8 @@ jobs:
         testbin\SettingsFileTests.exe || exit /b 1
         cl /nologo /EHsc /W4 /std:c++17 tests\CpdlcPacketTests.cpp /Fe:testbin\CpdlcPacketTests.exe /Fo:testbin\ || exit /b 1
         testbin\CpdlcPacketTests.exe || exit /b 1
+        cl /nologo /EHsc /W4 /std:c++17 tests\CpdlcStationsTests.cpp /Fe:testbin\CpdlcStationsTests.exe /Fo:testbin\ || exit /b 1
+        testbin\CpdlcStationsTests.exe || exit /b 1
 
     - name: Build artifact from source
       run: msbuild "${env:GITHUB_WORKSPACE}\VATCANSitu.vcxproj"

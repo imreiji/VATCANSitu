@@ -14,6 +14,7 @@ bool CSiTRadar::halfSecTick = FALSE;
 CRadarScreen* CSiTRadar::m_pRadScr;
 unordered_map<int, ACList> acLists;
 SituTbs::Config CSiTRadar::tbsConfig;
+SituCpdlcStations::Table CSiTRadar::cpdlcStations;
 unordered_map<string, bool> CSiTRadar::acADSB;
 unordered_map<string, bool> CSiTRadar::acRVSM;
 std::shared_mutex CSiTRadar::acCapabilityMutex;
@@ -151,6 +152,28 @@ CSiTRadar::CSiTRadar()
 				if (bad != 0) {
 					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "TBS",
 						("SituTBS.txt: " + std::to_string(bad) + " line(s) not understood and ignored").c_str(),
+						true, true, false, false, false);
+				}
+			}
+		}
+
+		// CPDLC station table. Absent, every next data authority lookup fails and says
+		// so, which is the right outcome - it never invents a station.
+		{
+			const std::string cpdlcPath = wxRadar::getSituWxDir() + "SituCPDLC.txt";
+			if (SituFiles::Exists(cpdlcPath)) {
+				cpdlcStations = SituCpdlcStations::Parse(SituConfig::Parse(SituFiles::Read(cpdlcPath)));
+
+				if (!cpdlcStations.skippedLines.empty()) {
+					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+						("SituCPDLC.txt: " + std::to_string(cpdlcStations.skippedLines.size())
+							+ " line(s) not understood and ignored").c_str(),
+						true, true, false, false, false);
+				}
+				for (const std::string& duplicate : cpdlcStations.duplicateControllerIds) {
+					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+						("SituCPDLC.txt: controller id " + duplicate
+							+ " is claimed by more than one station; the callsign prefix decides").c_str(),
 						true, true, false, false, false);
 				}
 			}
@@ -2086,6 +2109,105 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 	dc.Detach();
 }
 
+// Composes and sends one of the manual CPDLC uplinks from the callsign menu.
+//
+// Everything it needs to know about the next controller comes from SituCPDLC.txt and
+// from what that controller has said about themselves, rather than from a table of
+// facility names compiled into the plugin.
+void CSiTRadar::SendCPDLCUplink(const std::string& which)
+{
+	CFlightPlan fp = GetPlugIn()->FlightPlanSelectASEL();
+	if (!fp.IsValid()) { return; }
+
+	const std::string callsign = fp.GetCallsign();
+
+	// Who the aircraft is going to. During a handoff that is the handoff target;
+	// otherwise it is whoever has been coordinated as next. Both are position ids except
+	// GetCoordinatedNextController, which returns a callsign, so it is converted.
+	std::string nextPositionId = fp.GetHandoffTargetControllerId();
+	std::string nextCallsign;
+
+	if (!nextPositionId.empty()) {
+		nextCallsign = GetPlugIn()->ControllerSelectByPositionId(nextPositionId.c_str()).GetCallsign();
+	}
+	else {
+		nextCallsign = fp.GetCoordinatedNextController();
+		if (!nextCallsign.empty()) {
+			nextPositionId = GetPlugIn()->ControllerSelect(nextCallsign.c_str()).GetPositionId();
+		}
+	}
+
+	if (nextCallsign.empty() && nextPositionId.empty()) {
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+			(callsign + ": no next controller to name; hand off or coordinate one first").c_str(),
+			true, true, false, false, false);
+		return;
+	}
+
+	const SituCpdlcStations::Resolution next =
+		SituCpdlcStations::Resolve(cpdlcStations, nextPositionId, nextCallsign);
+
+	CPDLCMessage uplink;
+	uplink.isdlMessage = false;
+	uplink.messageType = "cpdlc";
+	uplink.receipient = callsign;
+	uplink.sender = CPDLCMessage::hoppieICAO;
+	uplink.timeParsed = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+	uplink.messageID = (int)(CPDLCMessage::ids++ % 64);
+
+	if (which == "CPDLCNDA") {
+		// Refuse rather than guess. A next data authority the far end is not listening
+		// on fails silently there, where the sending controller cannot see it.
+		if (!next.found) {
+			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+				(callsign + ": no CPDLC station known for " + (nextCallsign.empty() ? nextPositionId : nextCallsign)
+					+ "; add it to SituCPDLC.txt").c_str(),
+				true, true, false, false, false);
+			return;
+		}
+
+		uplink.responseRequired = "NE";
+		uplink.rawMessageContent = SituCpdlcStations::FormatHandover(cpdlcStations, next);
+	}
+	else if (which == "CPDLCContact" || which == "CPDLCMonitor") {
+		// The radio callsign from the station table when there is one, since that is what
+		// the unit is called on frequency; the raw callsign otherwise.
+		const std::string spoken = next.found && !next.radioCallsign.empty()
+			? next.radioCallsign
+			: nextCallsign;
+
+		const double frequency = nextCallsign.empty()
+			? 0.0
+			: GetPlugIn()->ControllerSelect(nextCallsign.c_str()).GetPrimaryFrequency();
+
+		// 199.998 is what the SDK returns when no primary frequency is selected, and
+		// UNICOM is where an aircraft goes when nobody is next.
+		const std::string spokenFrequency = (frequency > 0.0 && frequency < 199.0)
+			? CPDLCMessage::FreqTruncate(frequency)
+			: std::string("122.800");
+
+		uplink.responseRequired = "WU";
+		uplink.rawMessageContent = (which == "CPDLCContact" ? "CONTACT @" : "MONITOR @")
+			+ spoken + "@ @" + spokenFrequency + "@";
+	}
+	else {
+		return;
+	}
+
+	// The network call blocks, so it does not belong on the thread that draws. cpdlc.cpp
+	// touches no EuroScope SDK, which is what makes moving it off safe.
+	const std::string preview = uplink.rawMessageContent;
+	std::thread send([uplink]() mutable { uplink.SendCPDLCMessage(); });
+	send.detach();
+
+	mAcData[callsign].CPDLCMessages.push_back(uplink);
+
+	GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+		(callsign + ": " + preview).c_str(), true, true, false, false, false);
+
+	RequestRefresh();
+}
+
 void CSiTRadar::OnClickScreenObject(int ObjectType,
 	const char* sObjectId,
 	POINT Pt,
@@ -2646,6 +2768,10 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 			if (strcmp(sObjectId, "EXP")) {
 				menuState.MB3menu = false;
 			}
+		}
+		if (!strcmp(menuState.MB3SecondaryMenuType.c_str(), "CPDLCMenu")) {
+			menuState.MB3menu = false;
+			SendCPDLCUplink(sObjectId);
 		}
 		if (!strcmp(menuState.MB3SecondaryMenuType.c_str(), "SetComm")) {
 			menuState.MB3menu = false;

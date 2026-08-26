@@ -21,6 +21,7 @@
 #include "CPopUpMenu.h"
 #include "CAppWindows.h"
 #include "TbsConfig.h"
+#include "CpdlcStations.h"
 #include "SettingsFile.h"
 #include "SituFiles.h"
 #include "SituLegacy.h"
@@ -226,6 +227,9 @@ public:
     // Read once from SituTBS.txt at load. Static because the screens share it and
     // it never changes at run time.
     static SituTbs::Config tbsConfig;
+
+    // CPDLC station table, read once from SituCPDLC.txt.
+    static SituCpdlcStations::Table cpdlcStations;
 
     static unordered_map<string, bool> acADSB;
     static unordered_map<string, bool> acRVSM;
@@ -469,6 +473,9 @@ protected:
     static POINT ListOrigin(const ACList& list, const RECT& radarea);
     static void ClampListOffset(ACList& list, const RECT& radarea);
     static void ResolveListOffsets(const RECT& radarea);
+
+    // Composes and sends one manual CPDLC uplink from the callsign menu.
+    void SendCPDLCUplink(const std::string& which);
 
     // helper functions
     clock_t time = clock();
