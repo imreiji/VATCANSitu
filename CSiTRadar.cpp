@@ -1309,6 +1309,17 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 				// buttons/listboxes/textfields. Iterating by value deep-copied every window
 				// each frame and discarded those writes.
 				for (auto& window : menuState.radarScrWindows) {
+
+					// The CPDLC list is built from the message store when the window is
+					// constructed, so without this a window left open never shows anything
+					// that arrived after it was opened.
+					if (window.second.m_winType == WINDOW_CPDLC && !window.second.m_listboxes_.empty()) {
+						const auto entry = mAcData.find(window.second.m_callsign);
+						if (entry != mAcData.end()) {
+							window.second.m_listboxes_.front().PopulateCPDLCListBox(entry->second.CPDLCMessages);
+						}
+					}
+
 					SWindowElements r = window.second.DrawWindow(&dc);
 					AddScreenObject(WINDOW_TITLE_BAR, to_string(window.second.m_windowId_).c_str(), r.titleBarRect, true, to_string(window.second.m_windowId_).c_str());
 					
@@ -2197,6 +2208,16 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 			}
 
 		}
+	}
+
+	if (ObjectType == WINDOW_CPDLC) {
+		if (func == "Close") {
+			menuState.radarScrWindows.erase(stoi(id));
+			RequestRefresh();
+		}
+		// The reply and category buttons are drawn but not wired up yet. Clicking one
+		// does nothing rather than doing something half defined.
+		return;
 	}
 
 	if (ObjectType == WINDOW_HANDOFF_EXT_CJS) {
