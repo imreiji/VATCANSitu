@@ -568,6 +568,22 @@ private:
 
 public:
 
+    // Absolute path to the plugin's situWx folder, with a trailing backslash.
+    //
+    // Everything that touched this folder used the relative path ".\situWx\", which
+    // resolves against the process's current working directory - and EuroScope's working
+    // directory moves. Windows common dialogs change it to the last browsed folder unless
+    // OFN_NOCHANGEDIR is set, so opening a sector file, an ASR or a settings file drags the
+    // CWD somewhere new. The next weather refresh then created situWx wherever that
+    // happened to be, which is why the folder turned up scattered under the sector package.
+    //
+    // settings.json had the same problem and it mattered more: the plugin read and wrote
+    // its settings at whatever path the CWD pointed at, so saved list positions, weather
+    // centre and SFI preferences could be written to one folder and looked for in another.
+    //
+    // Resolved from this DLL's own location, which does not move.
+    static std::string getSituWxDir();
+
     static void loadPNG(std::vector<unsigned char>& buffer, const std::string& filename); //designed for loading files from hard disk in an std::vector
 
     static void parseRadarPNG(CRadarScreen* rad); 

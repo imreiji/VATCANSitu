@@ -14,6 +14,37 @@ std::shared_mutex wxRadar::altimeterMutex;
 std::shared_mutex wxRadar::atisLetterMutex;
 json wxRadar::jsVatsimDataFeed;
 
+std::string wxRadar::getSituWxDir()
+{
+    // GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS with the address of a function in this module
+    // gives this DLL's handle rather than the host executable's, so the folder follows the
+    // plugin and not EuroScope.exe.
+    char modulePath[MAX_PATH] = { 0 };
+    HMODULE thisModule = NULL;
+
+    if (GetModuleHandleExA(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCSTR>(&wxRadar::getSituWxDir),
+        &thisModule) == 0)
+    {
+        thisModule = NULL;   // falls back to the executable path below
+    }
+
+    if (GetModuleFileNameA(thisModule, modulePath, MAX_PATH) == 0)
+    {
+        // Nothing sensible left to resolve against. The old relative path is still wrong,
+        // but it is better than an empty one.
+        return ".\\situWx\\";
+    }
+
+    std::string dir(modulePath);
+    const size_t slash = dir.find_last_of("\\/");
+
+    if (slash == std::string::npos) { return ".\\situWx\\"; }
+
+    return dir.substr(0, slash) + "\\situWx\\";
+}
+
 void wxRadar::PushAsyncMessage(const CAsyncResponse& message)
 {
     std::lock_guard<std::mutex> lock(asyncMessagesMutex);
@@ -52,7 +83,10 @@ void wxRadar::parseRadarPNG(CRadarScreen* rad) {
     
     GetRainViewerJSON(rad);
 
-    if(CreateDirectory(".\\situWx\\", NULL)) {}
+    const std::string situWxDir = wxRadar::getSituWxDir();
+    const std::string situWxPng = situWxDir + "0_0.png";
+
+    if (CreateDirectoryA(situWxDir.c_str(), NULL)) {}
 
     CURL* pngDL = curl_easy_init();
     FILE* dlPNG;
@@ -61,7 +95,7 @@ void wxRadar::parseRadarPNG(CRadarScreen* rad) {
     // host and /v2/radar/<frame> portion that used to be hardcoded here.
     string tileCacheurl = wxRadar::ts + "/256/4/" + wxRadar::wxLatCtr + "/" + wxRadar::wxLongCtr + "/0/0_0.png";
 
-    const char* filename = ".\\situWx\\0_0.png";
+    const char* filename = situWxPng.c_str();
     curl_easy_setopt(pngDL, CURLOPT_URL, tileCacheurl.c_str());
     curl_easy_setopt(pngDL, CURLOPT_WRITEFUNCTION, write_file);
 
