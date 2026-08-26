@@ -25,7 +25,9 @@ const COLORREF C_WX_BLUE = RGB(0, 32, 120);
 const COLORREF C_PPS_TBS_PINK = RGB(244, 186, 255);
 
 // Math
-const double PI = 3.14159;
+// Was 3.14159. Six significant figures is enough for the tag connector angles it is
+// mostly used for, but it also feeds the great circle maths in HaloTool.
+const double PI = 3.14159265358979323846;
 
 // Tag Settings
 const int TAG_MAX_X_OFFSET = 60;

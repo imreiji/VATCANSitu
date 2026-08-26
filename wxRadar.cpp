@@ -281,7 +281,7 @@ void wxRadar::parseVatsimATIS(int i) {
     CAsyncResponse result;
 
     if (vatsimURL) {
-        curl_easy_setopt(vatsimURL, CURLOPT_URL, "http://status.vatsim.net/status.json");
+        curl_easy_setopt(vatsimURL, CURLOPT_URL, "https://status.vatsim.net/status.json");
         curl_easy_setopt(vatsimURL, CURLOPT_WRITEFUNCTION, write_data);
         curl_easy_setopt(vatsimURL, CURLOPT_WRITEDATA, &strVatsimURL);
         curl_easy_setopt(vatsimURL, CURLOPT_TIMEOUT_MS, 1500L);

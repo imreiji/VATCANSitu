@@ -760,10 +760,17 @@ void SituPlugin::OnCompilePrivateChat(const char* sSenderCallsign,
         c = toupper(c);
     }
 
-    if (CSiTRadar::mAcData[cs].pointOutFromMe) {
-        if (!strcmp(msg.c_str(), "OK")) {
-            CSiTRadar::mAcData[cs].POAcceptTime = clock();
-        }
-    }
+    // find(), not operator[]. This ran on every private message received, and cs is just
+    // the first word of whatever was typed - so operator[] default-constructed an ACData
+    // keyed on that word. A message of "hello there" created an aircraft called HELLO,
+    // which then showed up in the off-screen list until the five minute garbage collector
+    // in OnRefresh swept it.
+    if (cs.empty()) { return; }
 
+    auto entry = CSiTRadar::mAcData.find(cs);
+    if (entry == CSiTRadar::mAcData.end()) { return; }
+
+    if (entry->second.pointOutFromMe && !strcmp(msg.c_str(), "OK")) {
+        entry->second.POAcceptTime = clock();
+    }
 }

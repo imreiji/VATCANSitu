@@ -1322,7 +1322,10 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 						// screen range, dummy buttons, not really necessary in ES.
 						but = TopMenu::DrawButton(&dc, menutopleft, 70, 23, "Relocate", autoRefresh);
-						ButtonToScreen(this, but, "Alt Filt Opts", BUTTON_MENU_RELOCATE);
+						// Registered as "Alt Filt Opts" from a paste. There is no handler for
+						// BUTTON_MENU_RELOCATE, so clicking does nothing either way, but the
+						// wrong id would mislead whoever adds one.
+						ButtonToScreen(this, but, "Relocate", BUTTON_MENU_RELOCATE);
 						menutopleft.y += 25;
 
 						TopMenu::DrawButton(&dc, menutopleft, 35, 23, "Zoom", 0);
@@ -1636,14 +1639,14 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 					menuButton but_dest_4 = { {283, 62}, "", 10, 10, C_MENU_GREY3, C_MENU_GREY2, C_MENU_TEXT_WHITE, menuState.destArptOn[3] };
 					but = TopMenu::DrawBut(&dc, but_dest_4);
-					ButtonToScreen(this, but, "Dest 3", BUTTON_MENU_DEST_4);
+					ButtonToScreen(this, but, "Dest 4", BUTTON_MENU_DEST_4);
 
 					auto dest4 = TopMenu::MakeField(dc, { 298, 60 }, 32, 15, menuState.destICAO[3].c_str());
 					AddScreenObject(BUTTON_MENU_DEST_ICAO, "dest4", dest4, 0, "");
 
 					menuButton but_dest_5 = { {338, 83}, "", 10, 10, C_MENU_GREY3, C_MENU_GREY2, C_MENU_TEXT_WHITE, menuState.destArptOn[4] };
 					but = TopMenu::DrawBut(&dc, but_dest_5);
-					ButtonToScreen(this, but, "Dest 3", BUTTON_MENU_DEST_5);
+					ButtonToScreen(this, but, "Dest 5", BUTTON_MENU_DEST_5);
 
 					auto dest5 = TopMenu::MakeField(dc, { 353, 80 }, 32, 15, menuState.destICAO[4].c_str());
 					AddScreenObject(BUTTON_MENU_DEST_ICAO, "dest5", dest5, 0, "");
@@ -3494,8 +3497,22 @@ void CSiTRadar::OnFlightPlanControllerAssignedDataUpdate(CFlightPlan FlightPlan,
 void CSiTRadar::OnFlightPlanDisconnect(CFlightPlan FlightPlan) {
 	string callSign = FlightPlan.GetCallsign();
 
+	// Ten maps are keyed by callsign; only mAcData was cleaned here. The rest grew for the
+	// lifetime of the session, and the consequence was not just memory: an aircraft that
+	// disconnected and reconnected got its halo, its PTL and its dragged tag position back
+	// without the controller asking for them.
 	mAcData.erase(callSign);
+	tempTagData.erase(callSign);
+	hoAcceptedTime.erase(callSign);
 
+	hashalo.erase(callSign);
+	hasPTL.erase(callSign);
+	isBlinking.erase(callSign);
+	isHandOffHold.erase(callSign);
+	ppsCJS.erase(callSign);
+	rtagOffset.erase(callSign);
+	fptagOffset.erase(callSign);
+	connectorOrigin.erase(callSign);
 }
 
 void CSiTRadar::DrawACList(POINT p, CDC* dc, unordered_map<string, ACData>& ac, int listType)
