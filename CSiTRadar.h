@@ -65,7 +65,12 @@ struct ACData {
     string POString{};
     ACRoute acFPRoute;
     bool multipleDiscrete{ false };
-    bool manualCorr{ false };
+
+    // Set once the plugin has broken the automatic flight plan association for a
+    // primary-only target, so it does not keep doing it and undo the controller's own
+    // manual correlation. Reset when the target regains SSR. Replaces manualCorr, which
+    // was read but never written, leaving its guard permanently false.
+    bool autoCorrelationCleared{ false };
     int follower{ 1 }; // 0 is light, 1 is med, 2 heavy, 3 super
 };
 
