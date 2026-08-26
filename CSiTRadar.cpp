@@ -13,6 +13,7 @@ buttonStates CSiTRadar::menuState = {};
 bool CSiTRadar::halfSecTick = FALSE;
 CRadarScreen* CSiTRadar::m_pRadScr;
 unordered_map<int, ACList> acLists;
+SituTbs::Config CSiTRadar::tbsConfig;
 unordered_map<string, bool> CSiTRadar::acADSB;
 unordered_map<string, bool> CSiTRadar::acRVSM;
 std::shared_mutex CSiTRadar::acCapabilityMutex;
@@ -130,6 +131,28 @@ CSiTRadar::CSiTRadar()
 		if (menuState.ctrlRemarkDefaults.size() < 7) {
 			for (int i = (int)menuState.ctrlRemarkDefaults.size(); i < 7; i++) {
 				menuState.ctrlRemarkDefaults.emplace_back("");
+			}
+		}
+
+		// TBS configuration, read once. A missing file leaves no airports configured,
+		// which turns the marker off rather than breaking anything.
+		{
+			const std::string tbsPath = wxRadar::getSituWxDir() + "SituTBS.txt";
+			std::ifstream tbsFile(tbsPath.c_str(), std::ios::binary);
+			if (tbsFile.is_open()) {
+				std::stringstream tbsText;
+				tbsText << tbsFile.rdbuf();
+				const SituConfig::ParseResult tbsParsed = SituConfig::Parse(tbsText.str());
+				tbsConfig = SituTbs::Parse(tbsParsed);
+
+				// Say what was thrown away. A separation figure that failed to load is
+				// the worst thing in that file to be quiet about.
+				const size_t bad = tbsParsed.skippedLines.size() + tbsConfig.rejectedLines.size();
+				if (bad != 0) {
+					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "TBS",
+						("SituTBS.txt: " + std::to_string(bad) + " line(s) not understood and ignored").c_str(),
+						true, true, false, false, false);
+				}
 			}
 		}
 
@@ -773,122 +796,57 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 					}
 
 					// Draw TBS Marker
-					// TBS only at CYYZ
-
-					//Determine if the aircraft is on approach
-					if (radarTarget.GetCorrelatedFlightPlan().GetControllerAssignedData().GetClearedAltitude() == 1 ||
-						radarTarget.GetCorrelatedFlightPlan().GetControllerAssignedData().GetClearedAltitude() == 2)
+					//
+					// Which airports have TBS, their magnetic variation, the approach
+					// gate and the whole wake matrix now come from SituTBS.txt. All of
+					// it used to be here, gated on the destination being CYYZ, with
+					// Toronto's variation written as a bare 10 in two places with
+					// opposite signs.
 					{
-						if (!strcmp(radarTarget.GetCorrelatedFlightPlan().GetFlightPlanData().GetDestination(), "CYYZ"))
-						{
-							if (radarTarget.GetCorrelatedFlightPlan().GetDistanceToDestination() < 20 &&
-								radarTarget.GetCorrelatedFlightPlan().GetDistanceToDestination() > 1 &&
-								radarTarget.GetPosition().GetPressureAltitude() > 500) {
+						const CFlightPlan tbsFp = radarTarget.GetCorrelatedFlightPlan();
+						const int clearedAltitude = tbsFp.GetControllerAssignedData().GetClearedAltitude();
 
-								// ES reports track in true, tbsHdg is magnetic, and 10 is the CYYZ
-								// variation that converts between them. Normalised to -180..180
-								// so a heading either side of north is still a small difference:
-								// the raw subtraction reads 358 against 5 as 363, not -7, which
-								// would silently refuse to engage TBS on a runway near north.
-								double headingDelta = radarTarget.GetTrackHeading() - menuState.tbsHdg + 10;
+						// 1 and 2 are the EuroScope conventions for cleared for approach.
+						if (clearedAltitude == 1 || clearedAltitude == 2) {
+
+							const SituTbs::Airport* tbsAirport =
+								SituTbs::FindAirport(tbsConfig, tbsFp.GetFlightPlanData().GetDestination());
+
+							const double distanceToDest = tbsFp.GetDistanceToDestination();
+
+							if (tbsAirport != nullptr
+								&& distanceToDest < tbsConfig.gate.maxDistanceNm
+								&& distanceToDest > tbsConfig.gate.minDistanceNm
+								&& radarTarget.GetPosition().GetPressureAltitude() > tbsConfig.gate.minAltitudeFt) {
+
+								// ES reports track in true and the runway heading is set
+								// in magnetic, so the variation reconciles them.
+								// Normalised to -180..180 so a heading either side of
+								// north is still a small difference: the raw subtraction
+								// reads 358 against 5 as 363 rather than -7, and TBS
+								// would silently refuse to engage on a runway near north.
+								double headingDelta = radarTarget.GetTrackHeading()
+									- menuState.tbsHdg + tbsAirport->magneticVariation;
 								headingDelta = fmod(headingDelta + 180.0, 360.0);
 								if (headingDelta < 0) { headingDelta += 360.0; }
 								headingDelta -= 180.0;
 
-								const int i = static_cast<int>(headingDelta);
+								if (fabs(headingDelta) < tbsConfig.gate.headingToleranceDeg) {
 
-								if (i < 7 && i > -7)
-								{
 									double tbsDist = 0;
-									// Lead plane is L
-									if (radarTarget.GetCorrelatedFlightPlan().GetFlightPlanData().GetAircraftWtc() == 'L') {
-										tbsDist = 3; // min radar 
-										if ((double)radarTarget.GetGS() / 3600 * 68 < tbsDist) {
-											tbsDist = (double)radarTarget.GetGS() / 3600 * 68;
-										}
-									}
+									const bool haveSeparation = SituTbs::SeparationFor(
+										tbsConfig,
+										tbsFp.GetFlightPlanData().GetAircraftWtc(),
+										SituTbs::WtcForFollowerIndex(mAcData[callSign].follower),
+										radarTarget.GetGS(),
+										menuState.tbsMixed,
+										tbsDist);
 
-									// Lead plane is M
-									if (radarTarget.GetCorrelatedFlightPlan().GetFlightPlanData().GetAircraftWtc() == 'M') {
-										if (mAcData[callSign].follower == 0) {
-											tbsDist = 4;
-											if ((double)radarTarget.GetGS() / 3600 * 90 < tbsDist) {
-												tbsDist = (double)radarTarget.GetGS() / 3600 * 90;
-											}
-										}
-										else if (mAcData[callSign].follower >= 1) {
-											tbsDist = 3; // min radar
-
-											if ((double)radarTarget.GetGS() / 3600 * 68 < tbsDist) {
-												tbsDist = (double)radarTarget.GetGS() / 3600 * 68;
-											}
-										}
-									}
-
-									// Lead Plane is H
-									if (radarTarget.GetCorrelatedFlightPlan().GetFlightPlanData().GetAircraftWtc() == 'H') {
-										if (mAcData[callSign].follower == 0) {
-											tbsDist = 6;
-											if ((double)radarTarget.GetGS() / 3600 * 135 < tbsDist) {
-												tbsDist = (double)radarTarget.GetGS() / 3600 * 135;
-											}
-										}
-										else if (mAcData[callSign].follower == 1) {
-											tbsDist = 5;
-											if ((double)radarTarget.GetGS() / 3600 * 113 < tbsDist) {
-												tbsDist = (double)radarTarget.GetGS() / 3600 * 113;
-											}
-										}
-										else if (mAcData[callSign].follower == 2) {
-											tbsDist = 4;
-											if ((double)radarTarget.GetGS() / 3600 * 90 < tbsDist) {
-												tbsDist = (double)radarTarget.GetGS() / 3600 * 90;
-											}
-										}
-										else if (mAcData[callSign].follower == 3) {
-											tbsDist = 3;
-											if ((double)radarTarget.GetGS() / 3600 * 68 < tbsDist) {
-												tbsDist = (double)radarTarget.GetGS() / 3600 * 68;
-											}
-										}
-									}
-
-									// Lead Plane is J
-									if (radarTarget.GetCorrelatedFlightPlan().GetFlightPlanData().GetAircraftWtc() == 'J') {
-										if (mAcData[callSign].follower == 0) {
-											tbsDist = 8;
-											if ((double)radarTarget.GetGS() / 3600 * 180 < tbsDist) {
-												tbsDist = (double)radarTarget.GetGS() / 3600 * 180;
-											}
-										}
-										else if (mAcData[callSign].follower == 1) {
-											tbsDist = 7;
-											if ((double)radarTarget.GetGS() / 3600 * 158 < tbsDist) {
-												tbsDist = (double)radarTarget.GetGS() / 3600 * 158;
-											}
-										}
-										else if (mAcData[callSign].follower == 2) {
-											tbsDist = 6;
-											if ((double)radarTarget.GetGS() / 3600 * 135 < tbsDist) {
-												tbsDist = (double)radarTarget.GetGS() / 3600 * 135;
-											}
-										}
-										else if (mAcData[callSign].follower == 3) {
-											tbsDist = 4;
-											if ((double)radarTarget.GetGS() / 3600 * 90 < tbsDist) {
-												tbsDist = (double)radarTarget.GetGS() / 3600 * 90;
-											}
-										}
-									}
-									if (menuState.tbsMixed && tbsDist < 5) {
-										tbsDist = 5;
-									}
-
-									if (tbsDist != 0) {
-										POINT followerP = HaloTool::drawTBS(&dc, radarTarget, this, p, tbsDist, pixnm, (double)((double)menuState.tbsHdg - 10));
+									if (haveSeparation) {
+										POINT followerP = HaloTool::drawTBS(&dc, radarTarget, this, p, tbsDist, pixnm,
+											(double)menuState.tbsHdg - tbsAirport->magneticVariation);
 
 										// draw letter to allow toggling of follower
-
 										dc.SelectObject(CFontHelper::Euroscope14);
 										dc.SetTextColor(C_PPS_TBS_PINK);
 
@@ -898,15 +856,9 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 										rectTBS.top = followerP.y - 5;
 										rectTBS.bottom = followerP.y + 10;
 
-										string tbsFollowerStr;
-										if (mAcData[callSign].follower == 0) { tbsFollowerStr = 'L'; }
-										if (mAcData[callSign].follower == 1) { tbsFollowerStr = 'M'; }
-										if (mAcData[callSign].follower == 2) { tbsFollowerStr = 'H'; }
-										if (mAcData[callSign].follower == 3) { tbsFollowerStr = 'J'; }
-
+										const string tbsFollowerStr(1, SituTbs::WtcForFollowerIndex(mAcData[callSign].follower));
 										dc.DrawText(tbsFollowerStr.c_str(), &rectTBS, DT_LEFT);
 										AddScreenObject(TBS_FOLLOWER_TOGGLE, callSign.c_str(), rectTBS, false, "Toggle TBS Follower");
-
 									}
 								}
 							}

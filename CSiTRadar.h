@@ -20,6 +20,7 @@
 #include <shared_mutex>
 #include "CPopUpMenu.h"
 #include "CAppWindows.h"
+#include "TbsConfig.h"
 #include "HaloTool.h"
 #include "constants.h"
 #include "TopMenu.h"
@@ -215,6 +216,10 @@ public:
     static unordered_map<string, clock_t> hoAcceptedTime;
     // Published by the VATSIM datafeed worker, read on the main thread. Take
     // acCapabilityMutex for either.
+    // Read once from SituTBS.txt at load. Static because the screens share it and
+    // it never changes at run time.
+    static SituTbs::Config tbsConfig;
+
     static unordered_map<string, bool> acADSB;
     static unordered_map<string, bool> acRVSM;
     static std::shared_mutex acCapabilityMutex;

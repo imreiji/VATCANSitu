@@ -73,6 +73,8 @@ jobs:
         testbin\ConfigFileTests.exe || exit /b 1
         cl /nologo /EHsc /W4 /std:c++17 tests\CpdlcAtisTests.cpp /Fe:testbin\CpdlcAtisTests.exe /Fo:testbin\ || exit /b 1
         testbin\CpdlcAtisTests.exe || exit /b 1
+        cl /nologo /EHsc /W4 /std:c++17 tests\TbsConfigTests.cpp /Fe:testbin\TbsConfigTests.exe /Fo:testbin\ || exit /b 1
+        testbin\TbsConfigTests.exe || exit /b 1
 
     - name: Build artifact from source
       run: msbuild "${env:GITHUB_WORKSPACE}\VATCANSitu.vcxproj"
