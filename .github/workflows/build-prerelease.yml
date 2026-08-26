@@ -58,13 +58,15 @@ jobs:
     # EuroScope SDK. They compare the parser against the original hand written logic over
     # a corpus, which is what makes it safe to change code that writes a field every other
     # controller on the network can see.
-    - name: Run scratchpad tests
+    - name: Run standalone tests
       shell: cmd
       run: |
         call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
         if not exist testbin md testbin
         cl /nologo /EHsc /W4 /std:c++17 tests\ScratchpadTests.cpp /Fe:testbin\ScratchpadTests.exe /Fo:testbin\ || exit /b 1
         testbin\ScratchpadTests.exe || exit /b 1
+        cl /nologo /EHsc /W4 /std:c++17 tests\PositionStringTests.cpp /Fe:testbin\PositionStringTests.exe /Fo:testbin\ || exit /b 1
+        testbin\PositionStringTests.exe || exit /b 1
 
     - name: Build artifact from source
       run: msbuild "${env:GITHUB_WORKSPACE}\VATCANSitu.vcxproj"
