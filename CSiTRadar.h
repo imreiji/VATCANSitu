@@ -47,11 +47,9 @@ struct ACData {
 
     bool isJurisdictional{ FALSE };
     bool isOnScreen{ FALSE };
-    bool isDestAprt{ FALSE };
     bool isQuickLooked{ false };
 
     int tagWidth{ 65 }; 
-    string CID;
     bool extAlt{ FALSE };
     int destLabelType{ 0 };
     deque<CPosition> prevPosition;
@@ -215,7 +213,6 @@ public:
     static unordered_map<string, ACData> mAcData;
     static unordered_map<string, int> tempTagData;
     static unordered_map<string, clock_t> hoAcceptedTime;
-    static map<string, bool> destAirportList;
     // Published by the VATSIM datafeed worker, read on the main thread. Take
     // acCapabilityMutex for either.
     static unordered_map<string, bool> acADSB;

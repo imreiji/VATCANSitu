@@ -9,7 +9,6 @@ unordered_map<string, ACData> CSiTRadar::mAcData;
 unordered_map<string, int> CSiTRadar::tempTagData;
 map<string, menuButton> TopMenu::menuButtons;
 unordered_map<string, clock_t> CSiTRadar::hoAcceptedTime;
-map<string, bool> CSiTRadar::destAirportList;
 buttonStates CSiTRadar::menuState = {};
 bool CSiTRadar::halfSecTick = FALSE;
 CRadarScreen* CSiTRadar::m_pRadScr;
