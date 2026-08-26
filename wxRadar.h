@@ -593,7 +593,10 @@ public:
 
         if (rainViewerJson)
         {
-            curl_easy_setopt(rainViewerJson, CURLOPT_URL, "https://api.rainviewer.com/public/maps.json");
+            // maps.json was retired. It returned a flat array of timestamps, so the parse
+            // below took j.back(). weather-maps.json returns an object, and reading it with
+            // the old parse threw on every refresh - the crash reported upstream.
+            curl_easy_setopt(rainViewerJson, CURLOPT_URL, "https://api.rainviewer.com/public/weather-maps.json");
             curl_easy_setopt(rainViewerJson, CURLOPT_WRITEFUNCTION, write_data);
             curl_easy_setopt(rainViewerJson, CURLOPT_WRITEDATA, &rainViewerJsonString);
             CURLcode res;
@@ -602,8 +605,15 @@ public:
         }
 
         try {
-            json j = json::parse(rainViewerJsonString.c_str());
-            wxRadar::ts = to_string(j.back());
+            json j = json::parse(rainViewerJsonString);
+
+            // ts now carries a whole URL prefix (host + the newest radar frame's path)
+            // rather than a bare timestamp, so the tile URL in parseRadarPNG no longer
+            // hardcodes the tilecache host.
+            const string host = j["host"];
+            const string path = j["radar"]["past"].back()["path"];
+
+            wxRadar::ts = host + path;
         }
         catch (exception& e) {
             rad->GetPlugIn()->DisplayUserMessage("VATCANSitu", "Error", string("Failed to get RainViewer JSON" + string(e.what())).c_str(), true, true, true, true, true);

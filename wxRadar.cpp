@@ -57,7 +57,9 @@ void wxRadar::parseRadarPNG(CRadarScreen* rad) {
     CURL* pngDL = curl_easy_init();
     FILE* dlPNG;
     errno_t err;
-    string tileCacheurl = "https://tilecache.rainviewer.com/v2/radar/" + wxRadar::ts + "/256/4/" + wxRadar::wxLatCtr + "/" + wxRadar::wxLongCtr + "/0/0_0.png";
+    // ts is now "<host><path>" from weather-maps.json, so it already carries the scheme,
+    // host and /v2/radar/<frame> portion that used to be hardcoded here.
+    string tileCacheurl = wxRadar::ts + "/256/4/" + wxRadar::wxLatCtr + "/" + wxRadar::wxLongCtr + "/0/0_0.png";
 
     const char* filename = ".\\situWx\\0_0.png";
     curl_easy_setopt(pngDL, CURLOPT_URL, tileCacheurl.c_str());
