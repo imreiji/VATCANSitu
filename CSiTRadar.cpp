@@ -3102,7 +3102,7 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 				if (CPDLCMessage::hoppieCode.empty()) {
 					menuState.CPDLCOn = false;
 					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-						"No Hoppie logon code. Put it in situWx\SituLocal.txt as HoppieCode=...",
+						"No Hoppie logon code. Put it in situWx\\SituLocal.txt as HoppieCode=...",
 						true, true, false, false, false);
 					return;
 				}
