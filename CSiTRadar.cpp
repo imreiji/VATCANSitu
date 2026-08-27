@@ -201,6 +201,7 @@ CSiTRadar::CSiTRadar()
 
 		SituSettings::Settings settings;
 		SituSettings::LocalSettings local;
+		SituSettings::LocalSettings migratedLocal;
 		bool migratedFromJson = false;
 
 		if (SituFiles::Exists(settingsPath)) {
@@ -215,7 +216,7 @@ CSiTRadar::CSiTRadar()
 			// exception leaving an SDK callback unwinds through frames built by another
 			// compiler in a separately linked binary. Caught by base type here.
 			try {
-				settings = SituLegacy::SettingsFromJson(SituFiles::Read(legacyPath), local);
+				settings = SituLegacy::SettingsFromJson(SituFiles::Read(legacyPath), migratedLocal);
 				migratedFromJson = true;
 			}
 			catch (const std::exception&) {
@@ -228,6 +229,12 @@ CSiTRadar::CSiTRadar()
 		if (SituFiles::Exists(localPath)) {
 			local = SituSettings::ParseLocal(SituConfig::Parse(SituFiles::Read(localPath)));
 		}
+
+		// Anything SituLocal.txt left blank comes from the migration. Assigning the file
+		// over the migrated values instead lost the logon code of anyone who had copied a
+		// blank SituLocal.txt in beside their existing settings.json - the credential was
+		// recovered and then immediately discarded, and Hoppie answered "no logon code".
+		SituSettings::FillEmptyFrom(local, migratedLocal);
 
 		wxRadar::wxLatCtr = settings.wxLat;
 		wxRadar::wxLongCtr = settings.wxLong;
@@ -3089,6 +3096,24 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 			menuState.CPDLCOn = !menuState.CPDLCOn;
 
 			if (menuState.CPDLCOn) {
+				// Say what is missing here rather than asking Hoppie and relaying
+				// "error (no logon code)", which does not name the file it is missing
+				// from.
+				if (CPDLCMessage::hoppieCode.empty()) {
+					menuState.CPDLCOn = false;
+					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+						"No Hoppie logon code. Put it in situWx\\SituLocal.txt as HoppieCode=...",
+						true, true, false, false, false);
+					return;
+				}
+				if (CPDLCMessage::hoppieICAO.empty()) {
+					menuState.CPDLCOn = false;
+					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+						"No station set. Enter one in the Setup panel, or HoppieICAO= in SituLocal.txt",
+						true, true, false, false, false);
+					return;
+				}
+
 				// Poll straight away rather than waiting up to a minute for the timer.
 				StartCPDLCPoll();
 				menuState.lastCPDLCPoll = clock();

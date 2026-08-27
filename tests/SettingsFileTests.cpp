@@ -198,6 +198,39 @@ int main()
               "settings.txt has no logon code key at all");
     }
 
+    // --- A blank field in SituLocal.txt is an absence, not an instruction to forget.
+    //
+    //     Doing this the obvious way lost people's logon codes: the migration recovered
+    //     the credential from settings.json, and the read of SituLocal.txt then replaced
+    //     the whole struct. Anyone who had copied a blank SituLocal.txt in alongside
+    //     their existing settings.json got "error (no logon code)" from Hoppie.
+    {
+        LocalSettings fromFile;                 // a blank template, as shipped
+        LocalSettings fromMigration;
+        fromMigration.hoppieCode = "abc123XYZ";
+        fromMigration.hoppieICAO = "CZQM";
+
+        FillEmptyFrom(fromFile, fromMigration);
+        CheckEqual(fromFile.hoppieCode, "abc123XYZ", "a blank file takes the migrated code");
+        CheckEqual(fromFile.hoppieICAO, "CZQM", "and the migrated station");
+    }
+    {
+        LocalSettings fromFile;
+        fromFile.hoppieCode = "theRealOne";
+        LocalSettings fromMigration;
+        fromMigration.hoppieCode = "anOldOne";
+        fromMigration.hoppieICAO = "CZQX";
+
+        FillEmptyFrom(fromFile, fromMigration);
+        CheckEqual(fromFile.hoppieCode, "theRealOne", "a set field is not overwritten");
+        CheckEqual(fromFile.hoppieICAO, "CZQX", "but an unset one beside it is filled");
+    }
+    {
+        LocalSettings fromFile;
+        FillEmptyFrom(fromFile, LocalSettings());
+        Check(fromFile.hoppieCode.empty(), "nothing anywhere stays nothing");
+    }
+
     // --- Nothing here throws, whatever it is handed. The JSON it replaces threw out of
     //     a EuroScope callback on a malformed file.
     {
