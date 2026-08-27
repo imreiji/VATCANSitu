@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "CSiTRadar.h"
 #include "PositionString.h"
+#include "CpdlcUplinks.h"
 
 using namespace Gdiplus;
 
@@ -1382,9 +1383,43 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 					}
 					if (menuState.MB3menuType == 1) {
 
-						// Reserved for future expansion for other RMB clicks
+						// The CPDLC category flyout, opened by a button inside the CPDLC
+						// window rather than by a right click on a tag.
+						CPopUpMenu cpdlcMenu(menuState.CPDLCMenuData.pt);
+						cpdlcMenu.textColor = C_CPDLC_GREEN;
+						cpdlcMenu.populateCPDLCOptions(menuState.CPDLCMenuData.func);
 
+						// A category with nothing behind it draws nothing at all. An empty
+						// frame under the cursor reads as a menu that failed to populate.
+						if (!cpdlcMenu.m_listElements.empty()) {
 
+							// drawPopUpMenu lays elements upward from m_origin, so moving
+							// the origin down by the menu height hangs it below the button.
+							cpdlcMenu.m_origin.y += (int)cpdlcMenu.m_listElements.size() * 20;
+
+							if (cpdlcMenu.m_origin.y > radarea.bottom) { cpdlcMenu.m_origin.y = radarea.bottom; }
+							if ((cpdlcMenu.m_origin.y - (int)cpdlcMenu.m_listElements.size() * 20) < radarea.top + 60) {
+								cpdlcMenu.m_origin.y = radarea.top + 60 + (int)cpdlcMenu.m_listElements.size() * 20;
+							}
+							if ((cpdlcMenu.m_origin.x + cpdlcMenu.m_width_) > radarea.right) {
+								cpdlcMenu.m_origin.x = radarea.right - cpdlcMenu.m_width_;
+							}
+							if (cpdlcMenu.m_origin.x < radarea.left) { cpdlcMenu.m_origin.x = radarea.left; }
+
+							cpdlcMenu.drawPopUpMenu(&dc);
+
+							// Registered from what was just painted, so a row that moved
+							// off the bottom of the screen cannot keep catching clicks at
+							// the coordinate it last held.
+							for (auto& element : cpdlcMenu.m_listElements) {
+								if (element.m_isHeaderFooter != 0) { continue; }
+								AddScreenObject(BUTTON_MENU_CPDLC_OPTION, element.m_function.c_str(),
+									element.elementRect, false, element.m_text.c_str());
+							}
+							if (menuState.MB3hoverOn) {
+								cpdlcMenu.highlightSelection(&dc, menuState.MB3hoverRect);
+							}
+						}
 					}
 				}
 
@@ -2214,8 +2249,33 @@ void CSiTRadar::AcceptCPDLCLogon(const std::string& callsign)
 		uplink.responseToMessageID = request->messageID;
 	}
 
-	mAcData[callsign].cpdlcState = CPDLC_CONNECTED;
-	DispatchCPDLCUplink(uplink, callsign);
+	// The state changes when the acceptance is actually sent, not here. Staging a message
+	// the controller then abandons must not leave the aircraft marked connected.
+	StageCPDLCUplink(callsign, uplink);
+}
+
+// The wording that ends the service, from the [FREETEXT] row marked UNICOM. That is where
+// a unit puts what it wants said - CZQM's reads "SERVICES TERMINATED - MNT UNICOM 122.8".
+// A plain phrase when the file has no such row, because ending a service must not depend
+// on a config file having it.
+//
+// Read in two places: once when the message is composed, and again when it is sent, to
+// decide whether the aircraft has just been disconnected. Both go through here so an edit
+// to the file cannot leave a message that reads as a termination but does not act as one.
+std::string CSiTRadar::TerminatingMessageText()
+{
+	for (const SituCpdlcFreetext::Entry& entry : cpdlcFreetext.entries) {
+		if (entry.terminatesService) { return entry.text; }
+	}
+	return "CPDLC SERVICE TERMINATED";
+}
+
+std::string CSiTRadar::TerminatingReplyType()
+{
+	for (const SituCpdlcFreetext::Entry& entry : cpdlcFreetext.entries) {
+		if (entry.terminatesService) { return entry.replyType; }
+	}
+	return "NE";
 }
 
 // Ends the CPDLC service for an aircraft.
@@ -2232,23 +2292,12 @@ void CSiTRadar::EndCPDLCService(const std::string& callsign)
 		return;
 	}
 
-	std::string text = "CPDLC SERVICE TERMINATED";
-	std::string reply = "NE";
-
-	for (const SituCpdlcFreetext::Entry& entry : cpdlcFreetext.entries) {
-		if (!entry.terminatesService) { continue; }
-		text = entry.text;
-		reply = entry.replyType;
-		break;
-	}
-
 	CPDLCMessage uplink = NewCPDLCUplink(callsign);
-	uplink.responseRequired = reply;
-	uplink.rawMessageContent = text;
+	uplink.responseRequired = TerminatingReplyType();
+	uplink.rawMessageContent = TerminatingMessageText();
 
-	mAcData[callsign].cpdlcState = CPDLC_NOT_CONNECTED;
-	mAcData[callsign].cpdlcMnemonic = false;
-	DispatchCPDLCUplink(uplink, callsign);
+	// As with the logon, the connection state follows the send rather than the compose.
+	StageCPDLCUplink(callsign, uplink);
 }
 
 // Sends one of the canned messages, chosen by the button's label.
@@ -2271,13 +2320,20 @@ void CSiTRadar::SendCPDLCFreetext(const std::string& callsign, const std::string
 	uplink.responseRequired = entry->replyType;
 	uplink.rawMessageContent = entry->text;
 
-	CPDLCMessage* answering = LatestOpenDownlink(callsign);
-	if (answering != nullptr) { uplink.responseToMessageID = answering->messageID; }
+	// Pair the reply with whatever downlink is showing in the editor. Falling back to the
+	// most recent unanswered one covers the case where a reply button is pressed without
+	// a row having been clicked first, which is what issue #72 describes: a downlink the
+	// aircraft sent without asking for a reply used to leave the button with nothing to
+	// answer, and the reply was refused rather than sent unlinked.
+	CPDLCMessage* answering = SelectedDownlink(callsign);
+	if (answering == nullptr || answering->messageID == -1 || !answering->isdlMessage) {
+		answering = LatestOpenDownlink(callsign);
+	}
+	if (answering != nullptr && answering->messageID != -1) {
+		uplink.responseToMessageID = answering->messageID;
+	}
 
-	// The mnemonic marks an unread downlink. Answering one is what clears it.
-	if (answering != nullptr) { mAcData[callsign].cpdlcMnemonic = false; }
-
-	DispatchCPDLCUplink(uplink, callsign);
+	StageCPDLCUplink(callsign, uplink);
 }
 
 void CSiTRadar::CloseCPDLCEditor(const std::string& callsign)
@@ -2311,86 +2367,374 @@ void CSiTRadar::OpenCPDLCEditor(const std::string& callsign, POINT at)
 	menuState.radarScrWindows[editor.m_windowId_] = editor;
 }
 
-// Composes and sends one of the manual CPDLC uplinks from the callsign menu.
+// The editor's two message fields.
 //
-// Everything it needs to know about the next controller comes from SituCPDLC.txt and
-// from what that controller has said about themselves, rather than from a table of
-// facility names compiled into the plugin.
-void CSiTRadar::SendCPDLCUplink(const std::string& which)
+// Field 0 holds the downlink being answered - what the controller clicked in the list -
+// and field 1 the uplink being composed. Both are looked up through the window map rather
+// than cached, because a window can be closed between one click and the next and a
+// pointer into its vector would outlive it.
+static CPDLCMessage* CPDLCEditorField(const std::string& callsign, size_t index)
 {
-	CFlightPlan fp = GetPlugIn()->FlightPlanSelectASEL();
-	if (!fp.IsValid()) { return; }
-
-	const std::string callsign = fp.GetCallsign();
-
-	// Who the aircraft is going to. During a handoff that is the handoff target;
-	// otherwise it is whoever has been coordinated as next. Both are position ids except
-	// GetCoordinatedNextController, which returns a callsign, so it is converted.
-	std::string nextPositionId = fp.GetHandoffTargetControllerId();
-	std::string nextCallsign;
-
-	if (!nextPositionId.empty()) {
-		nextCallsign = GetPlugIn()->ControllerSelectByPositionId(nextPositionId.c_str()).GetCallsign();
+	for (auto& win : CSiTRadar::menuState.radarScrWindows) {
+		if (win.second.m_winType != WINDOW_CPDLC_EDITOR) { continue; }
+		if (win.second.m_callsign != callsign) { continue; }
+		if (win.second.m_textfields_.size() <= index) { return nullptr; }
+		return &win.second.m_textfields_[index].m_cpdlcmessage;
 	}
-	else {
-		nextCallsign = fp.GetCoordinatedNextController();
-		if (!nextCallsign.empty()) {
-			nextPositionId = GetPlugIn()->ControllerSelect(nextCallsign.c_str()).GetPositionId();
+	return nullptr;
+}
+
+CPDLCMessage* CSiTRadar::SelectedDownlink(const std::string& callsign)
+{
+	return CPDLCEditorField(callsign, 0);
+}
+
+CPDLCMessage* CSiTRadar::StagedUplink(const std::string& callsign)
+{
+	return CPDLCEditorField(callsign, 1);
+}
+
+// Puts a composed uplink in front of the controller instead of on the wire.
+//
+// Every uplink this plugin composes carries a value it took from somewhere else - the
+// cleared level, the assigned speed, whichever controller EuroScope thinks is next - and
+// each of those can be stale, unset, or simply not what the controller meant. Sending on
+// the button press gives them no moment to notice. So the button composes, the editor
+// shows it, and Send transmits.
+void CSiTRadar::StageCPDLCUplink(const std::string& callsign, const CPDLCMessage& uplink)
+{
+	// Open the editor under the CPDLC window when one is not already up, so the composed
+	// message has somewhere to appear.
+	if (StagedUplink(callsign) == nullptr) {
+		POINT at{ 0, 0 };
+		for (auto& win : menuState.radarScrWindows) {
+			if (win.second.m_winType == WINDOW_CPDLC && win.second.m_callsign == callsign) {
+				at.x = win.second.m_origin.x + win.second.m_width / 2;
+				at.y = win.second.m_origin.y + win.second.m_height + 130;
+				break;
+			}
+		}
+		if (at.x == 0 && at.y == 0) {
+			const RECT radarea = GetRadarArea();
+			at.x = radarea.left + (radarea.right - radarea.left) / 2;
+			at.y = radarea.top + (radarea.bottom - radarea.top) / 2;
+		}
+		OpenCPDLCEditor(callsign, at);
+	}
+
+	CPDLCMessage* staged = StagedUplink(callsign);
+	if (staged == nullptr) {
+		// No editor, which means no flight plan - the aircraft went away between the
+		// click and here. Say so rather than dropping the message silently.
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+			(callsign + ": no flight plan; cannot compose").c_str(), true, true, false, false, false);
+		return;
+	}
+
+	*staged = uplink;
+	RequestRefresh();
+}
+
+// Transmits what is staged in an editor, then closes it.
+//
+// The guard on "ERR:" is what stops a composition that already failed from going out as
+// an instruction. Those strings are written into the pending field precisely so the
+// controller can see why nothing was composed, and they must never reach an aircraft.
+void CSiTRadar::SendStagedCPDLCUplink(int editorWindowId)
+{
+	auto editor = menuState.radarScrWindows.find(editorWindowId);
+	if (editor == menuState.radarScrWindows.end()) { return; }
+	if (editor->second.m_textfields_.size() < 2) { return; }
+
+	const std::string callsign = editor->second.m_callsign;
+	CPDLCMessage uplink = editor->second.m_textfields_[1].m_cpdlcmessage;
+
+	if (uplink.rawMessageContent.empty() || uplink.rawMessageContent.compare(0, 4, "ERR:") == 0) {
+		editor->second.m_textfields_[1].m_cpdlcmessage.rawMessageContent = "ERR: NOTHING TO SEND";
+		RequestRefresh();
+		return;
+	}
+
+	// An empty variable field means the value the message was built around was missing.
+	// Upstream sent these; an aircraft receiving "CLIMB TO AND MAINTAIN" with nothing
+	// after it has been given an instruction it cannot read back or comply with.
+	if (uplink.rawMessageContent.find("@@") != std::string::npos) {
+		editor->second.m_textfields_[1].m_cpdlcmessage.rawMessageContent = "ERR: MESSAGE HAS AN EMPTY FIELD";
+		RequestRefresh();
+		return;
+	}
+
+	// The connection state follows what was actually sent, not what was composed, so a
+	// staged message the controller abandoned never changes it.
+	if (uplink.rawMessageContent == "LOGON ACCEPTED") {
+		mAcData[callsign].cpdlcState = CPDLC_CONNECTED;
+	}
+	else if (uplink.rawMessageContent == TerminatingMessageText()) {
+		mAcData[callsign].cpdlcState = CPDLC_NOT_CONNECTED;
+		mAcData[callsign].cpdlcMnemonic = false;
+	}
+
+	// Answer whatever downlink is showing in the field above, so the two are paired in
+	// the list rather than sitting there as unrelated lines.
+	CPDLCMessage* answering = SelectedDownlink(callsign);
+	if (answering != nullptr && answering->messageID != -1 && answering->isdlMessage) {
+		uplink.responseToMessageID = answering->messageID;
+		mAcData[callsign].cpdlcMnemonic = false;
+	}
+
+	menuState.radarScrWindows.erase(editorWindowId);
+	DispatchCPDLCUplink(uplink, callsign);
+}
+
+// Composes a departure clearance and stages it.
+//
+// The wording is entirely from the [DCL] rows of SituCPDLC.txt - which airport, which
+// subtype, which text - so a unit changes its clearance by editing a file. All this does
+// is gather what the template asks for and hand it over.
+void CSiTRadar::ComposeCPDLCPdc(const std::string& callsign)
+{
+	if (callsign.empty()) { return; }
+
+	CFlightPlan fp = GetPlugIn()->FlightPlanSelect(callsign.c_str());
+	if (!fp.IsValid()) {
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+			(callsign + ": no flight plan").c_str(), true, true, false, false, false);
+		return;
+	}
+
+	// The ATIS letter is published by a network worker, so it is read under the shared
+	// lock. A clearance without one is still worth sending, so a lock we cannot take
+	// yields an empty letter rather than blocking the draw thread.
+	std::string atisLetter;
+	{
+		std::shared_lock<std::shared_mutex> atisLock(wxRadar::atisLetterMutex, std::defer_lock);
+		if (atisLock.try_lock()) {
+			const std::string origin = fp.GetFlightPlanData().GetOrigin();
+			auto letter = wxRadar::arptAtisLetter.find(origin);
+			if (letter != wxRadar::arptAtisLetter.end()) { atisLetter = letter->second; }
+			atisLock.unlock();
 		}
 	}
 
-	if (nextCallsign.empty() && nextPositionId.empty()) {
+	CPDLCMessage uplink = NewCPDLCUplink(callsign);
+	CController me = GetPlugIn()->ControllerMyself();
+
+	// MakePDCMessage fills in messageType, responseRequired and the text from the
+	// template, and folds timeParsed into the clearance identifier - so the identifier
+	// the aircraft is given matches the message that carries it.
+	const std::string identifier = uplink.MakePDCMessage(fp, me, atisLetter);
+
+	if (uplink.rawMessageContent.empty()) {
 		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-			(callsign + ": no next controller to name; hand off or coordinate one first").c_str(),
+			(callsign + ": no departure clearance template matched " + fp.GetFlightPlanData().GetOrigin()).c_str(),
 			true, true, false, false, false);
 		return;
 	}
 
-	const SituCpdlcStations::Resolution next =
-		SituCpdlcStations::Resolve(cpdlcStations, nextPositionId, nextCallsign);
+	GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+		(callsign + ": clearance " + identifier + " ready to send").c_str(),
+		true, true, false, false, false);
+
+	StageCPDLCUplink(callsign, uplink);
+}
+
+// Opens the flyout for one category button, anchored under the button itself.
+void CSiTRadar::OpenCPDLCCategoryMenu(const std::string& callsign, const std::string& category, POINT at)
+{
+	menuState.MB3menu = true;
+	menuState.MB3menuType = 1;
+	menuState.MB3hoverRect = { 0, 0, 0, 0 };
+	menuState.MB3hoverOn = false;
+	menuState.MB3SecondaryMenuOn = false;
+	menuState.CPDLCMenuData.func = category;
+	menuState.CPDLCMenuData.callsign = callsign;
+	menuState.CPDLCMenuData.pt = at;
+}
+
+// Composes one CPDLC uplink and stages it in the editor for the controller to check.
+//
+// Two rules run through everything below.
+//
+// The value always comes from what EuroScope already holds for the aircraft - the cleared
+// level, the assigned speed, the assigned direct - rather than from a prompt. That is the
+// controller's existing workflow: set the clearance in the scope, then uplink it, and the
+// two cannot disagree. It also means the uplink is a statement of what was already
+// decided rather than a second place to decide it.
+//
+// Nothing composed here is sent. When a value is missing the message is refused with a
+// reason instead of going out with an empty field, because an aircraft cannot read back
+// "CLIMB TO AND MAINTAIN" with nothing after it.
+void CSiTRadar::ComposeCPDLCUplink(const std::string& which, const std::string& callsign)
+{
+	if (callsign.empty()) { return; }
+
+	CFlightPlan fp = GetPlugIn()->FlightPlanSelect(callsign.c_str());
+	if (!fp.IsValid()) {
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+			(callsign + ": no flight plan").c_str(), true, true, false, false, false);
+		return;
+	}
 
 	CPDLCMessage uplink = NewCPDLCUplink(callsign);
 
-	if (which == "CPDLCNDA") {
-		// Refuse rather than guess. A next data authority the far end is not listening
-		// on fails silently there, where the sending controller cannot see it.
-		if (!next.found) {
-			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-				(callsign + ": no CPDLC station known for " + (nextCallsign.empty() ? nextPositionId : nextCallsign)
-					+ "; add it to SituCPDLC.txt").c_str(),
-				true, true, false, false, false);
+	// Refusals go through here so they read the same wherever they come from.
+	auto refuse = [&](const std::string& why) {
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+			(callsign + ": " + why).c_str(), true, true, false, false, false);
+	};
+
+	if (which == "CPDLCNDA" || which == "CPDLCContact" || which == "CPDLCMonitor") {
+
+		// Who the aircraft is going to. During a handoff that is the handoff target;
+		// otherwise it is whoever has been coordinated as next. Both are position ids
+		// except GetCoordinatedNextController, which returns a callsign, so it is
+		// converted.
+		std::string nextPositionId = fp.GetHandoffTargetControllerId();
+		std::string nextCallsign;
+
+		if (!nextPositionId.empty()) {
+			nextCallsign = GetPlugIn()->ControllerSelectByPositionId(nextPositionId.c_str()).GetCallsign();
+		}
+		else {
+			nextCallsign = fp.GetCoordinatedNextController();
+			if (!nextCallsign.empty()) {
+				nextPositionId = GetPlugIn()->ControllerSelect(nextCallsign.c_str()).GetPositionId();
+			}
+		}
+
+		if (nextCallsign.empty() && nextPositionId.empty()) {
+			refuse("no next controller to name; hand off or coordinate one first");
 			return;
 		}
 
-		uplink.responseRequired = "NE";
-		uplink.rawMessageContent = SituCpdlcStations::FormatHandover(cpdlcStations, next);
+		const SituCpdlcStations::Resolution next =
+			SituCpdlcStations::Resolve(cpdlcStations, nextPositionId, nextCallsign);
+
+		if (which == "CPDLCNDA") {
+			// Refuse rather than guess. A next data authority the far end is not
+			// listening on fails silently there, where the sending controller cannot
+			// see it.
+			if (!next.found) {
+				refuse("no CPDLC station known for " + (nextCallsign.empty() ? nextPositionId : nextCallsign)
+					+ "; add it to SituCPDLC.txt");
+				return;
+			}
+
+			uplink.responseRequired = "NE";
+			uplink.rawMessageContent = SituCpdlcStations::FormatHandover(cpdlcStations, next);
+		}
+		else {
+			// The radio callsign from the station table when there is one, since that is
+			// what the unit is called on frequency; the raw callsign otherwise.
+			const std::string spoken = next.found && !next.radioCallsign.empty()
+				? next.radioCallsign
+				: nextCallsign;
+
+			const double frequency = nextCallsign.empty()
+				? 0.0
+				: GetPlugIn()->ControllerSelect(nextCallsign.c_str()).GetPrimaryFrequency();
+
+			// 199.998 is what the SDK returns when no primary frequency is selected, and
+			// UNICOM is where an aircraft goes when nobody is next.
+			const std::string spokenFrequency = (frequency > 0.0 && frequency < 199.0)
+				? CPDLCMessage::FreqTruncate(frequency)
+				: std::string("122.800");
+
+			if (spoken.empty()) {
+				refuse("the next controller has no name to put in the message");
+				return;
+			}
+
+			uplink.responseRequired = "WU";
+			uplink.rawMessageContent = (which == "CPDLCContact" ? "CONTACT @" : "MONITOR @")
+				+ spoken + "@ @" + spokenFrequency + "@";
+		}
 	}
-	else if (which == "CPDLCContact" || which == "CPDLCMonitor") {
-		// The radio callsign from the station table when there is one, since that is what
-		// the unit is called on frequency; the raw callsign otherwise.
-		const std::string spoken = next.found && !next.radioCallsign.empty()
-			? next.radioCallsign
-			: nextCallsign;
+	else if (which == "CPDLCClimb" || which == "CPDLCDescend") {
 
-		const double frequency = nextCallsign.empty()
-			? 0.0
-			: GetPlugIn()->ControllerSelect(nextCallsign.c_str()).GetPrimaryFrequency();
+		// GetClearedAltitude returns 1 and 2 for cleared-ILS and cleared-visual, which
+		// are not heights; LevelToUplink filters those to the filed final altitude.
+		const int level = SituCpdlcUplinks::LevelToUplink(
+			fp.GetControllerAssignedData().GetClearedAltitude(),
+			fp.GetFinalAltitude());
 
-		// 199.998 is what the SDK returns when no primary frequency is selected, and
-		// UNICOM is where an aircraft goes when nobody is next.
-		const std::string spokenFrequency = (frequency > 0.0 && frequency < 199.0)
-			? CPDLCMessage::FreqTruncate(frequency)
-			: std::string("122.800");
+		const std::string message = (which == "CPDLCClimb")
+			? SituCpdlcUplinks::ClimbTo(level)
+			: SituCpdlcUplinks::DescendTo(level);
+
+		if (message.empty()) {
+			refuse("no cleared or final altitude to send; set one first");
+			return;
+		}
+
+		uplink.opensMnemonic = true;
+		uplink.responseRequired = "WU";
+		uplink.rawMessageContent = message;
+	}
+	else if (which == "CPDLCConfALT") {
+		uplink.responseRequired = SituCpdlcUplinks::ReplyTypeFor(SituCpdlcUplinks::ConfirmAssignedAltitude());
+		uplink.rawMessageContent = SituCpdlcUplinks::ConfirmAssignedAltitude();
+	}
+	else if (which == "CPDLCSpeed" || which == "CPDLCSpeed+" || which == "CPDLCSpeed-") {
+
+		// Assigned speed only. Upstream fell back to the filed true airspeed, which turns
+		// a blank assignment into an instruction to fly a number nobody chose.
+		const int knots = fp.GetControllerAssignedData().GetAssignedSpeed();
+		if (knots <= 0) {
+			refuse("no assigned speed; set one in the scope first");
+			return;
+		}
+
+		const SituCpdlcUplinks::Qualifier qualifier =
+			(which == "CPDLCSpeed+") ? SituCpdlcUplinks::OrGreater :
+			(which == "CPDLCSpeed-") ? SituCpdlcUplinks::OrLess :
+			SituCpdlcUplinks::Exactly;
 
 		uplink.responseRequired = "WU";
-		uplink.rawMessageContent = (which == "CPDLCContact" ? "CONTACT @" : "MONITOR @")
-			+ spoken + "@ @" + spokenFrequency + "@";
+		uplink.rawMessageContent = SituCpdlcUplinks::MaintainSpeed(knots, qualifier);
+	}
+	else if (which == "CPDLCMach" || which == "CPDLCMach+" || which == "CPDLCMach-") {
+
+		// Multiplied by 100, so 82 is M0.82. Same reasoning as the speed above: an
+		// unassigned Mach is refused rather than filled in from the performance model.
+		const int machTimes100 = fp.GetControllerAssignedData().GetAssignedMach();
+		if (machTimes100 <= 0) {
+			refuse("no assigned Mach; set one in the scope first");
+			return;
+		}
+
+		const SituCpdlcUplinks::Qualifier qualifier =
+			(which == "CPDLCMach+") ? SituCpdlcUplinks::OrGreater :
+			(which == "CPDLCMach-") ? SituCpdlcUplinks::OrLess :
+			SituCpdlcUplinks::Exactly;
+
+		uplink.responseRequired = "WU";
+		uplink.rawMessageContent = SituCpdlcUplinks::MaintainMach(machTimes100, qualifier);
+	}
+	else if (which == "CPDLCDirect") {
+
+		// The direct the controller has already assigned - by the Direct To window, or by
+		// EuroScope's own dialog. Composing from a fix chosen after the fact would need
+		// the message to be rebuilt when the choice was made, which is how upstream ends
+		// up sending "PROCEED DIRECT" with an empty field.
+		const std::string fix = fp.GetControllerAssignedData().GetDirectToPointName();
+		if (fix.empty()) {
+			refuse("no assigned direct; set one with Direct To first");
+			return;
+		}
+
+		uplink.responseRequired = "WU";
+		uplink.rawMessageContent = SituCpdlcUplinks::ProceedDirect(fix);
+	}
+	else if (which == "CPDLCServTerm") {
+		uplink.responseRequired = SituCpdlcUplinks::ReplyTypeFor(SituCpdlcUplinks::SurveillanceTerminated());
+		uplink.rawMessageContent = SituCpdlcUplinks::SurveillanceTerminated();
 	}
 	else {
 		return;
 	}
 
-	DispatchCPDLCUplink(uplink, callsign);
+	StageCPDLCUplink(callsign, uplink);
 }
 
 void CSiTRadar::OnClickScreenObject(int ObjectType,
@@ -2495,12 +2839,41 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 				menuState.radarScrWindows[fpWindow.m_windowId_] = fpWindow;
 			}
 		}
+		else if (func == "PDC") {
+			ComposeCPDLCPdc(cs);
+		}
+		else if (func == "Radio" || func == "Altitude" || func == "Speed"
+			|| func == "Route" || func == "Radar") {
+			// A category. The messages behind it need a value out of the flight plan, so
+			// the button opens a flyout of them rather than sending anything itself.
+			// Area is the button's own rectangle, which anchors the menu under it.
+			OpenCPDLCCategoryMenu(cs, func, { Area.left, Area.bottom });
+		}
 		else if (!func.empty()) {
-			// A canned message, looked up by the button's own label. The category
-			// buttons - Altitude, Speed, Route and the rest - have no [FREETEXT] entry
-			// and no value picker behind them yet, so they report that rather than
-			// guessing at a message.
+			// A canned message, looked up by the button's own label in [FREETEXT]. The
+			// categories with nothing assigned to them - Standby is one, Misc another -
+			// fall through here and report that they have no message rather than
+			// guessing at one.
 			SendCPDLCFreetext(cs, func);
+		}
+
+		RequestRefresh();
+		return;
+	}
+
+	// The editor. Its Send button is the only thing in the plugin that transmits an
+	// uplink; every other CPDLC control composes into the pending field above it.
+	if (ObjectType == WINDOW_CPDLC_EDITOR) {
+		// The window id can name a window that has already gone - the editor closes
+		// itself on a send, and a second click on a stale rectangle would otherwise reach
+		// here. Both branches below look the id up again rather than trusting it.
+		if (GetAppWindowFromObjectId(id) == nullptr) { return; }
+
+		if (func == "Send") {
+			SendStagedCPDLCUplink(stoi(id));
+		}
+		else if (func == "Close") {
+			menuState.radarScrWindows.erase(stoi(id));
 		}
 
 		RequestRefresh();
@@ -2725,12 +3098,38 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 		// below works on m_ListBoxElementText, which a CPDLC row does not use - its
 		// content is the message, not that string - so it is handled here instead.
 		if (window->m_winType == WINDOW_CPDLC) {
+			const std::string cs = window->m_callsign;
+			const int clicked = stoi(le);
+
+			// Clicking the selected row again clears the selection, which is how a
+			// controller backs out of answering the wrong message.
+			bool wasSelected = false;
 			for (auto& lb : window->m_listboxes_) {
 				for (auto& lelem : lb.listBox_) {
-					lelem.m_selected_ = (lelem.m_elementID == stoi(le));
+					if (lelem.m_elementID == clicked && lelem.m_selected_) { wasSelected = true; }
 				}
 			}
-			OpenCPDLCEditor(window->m_callsign, { Pt.x, Pt.y + 40 });
+
+			CPDLCMessage chosen;
+			for (auto& lb : window->m_listboxes_) {
+				for (auto& lelem : lb.listBox_) {
+					lelem.m_selected_ = (!wasSelected && lelem.m_elementID == clicked);
+
+					// Only a downlink can be answered. Selecting one of our own uplinks
+					// leaves the field blank rather than offering to reply to ourselves.
+					if (lelem.m_selected_ && lelem.m_cpdlc_message.isdlMessage) {
+						chosen = lelem.m_cpdlc_message;
+					}
+				}
+			}
+
+			OpenCPDLCEditor(cs, { Pt.x, Pt.y + 40 });
+
+			// Push the selection into the editor's upper field. Without this the editor
+			// showed two empty boxes no matter what was clicked.
+			CPDLCMessage* downlink = SelectedDownlink(cs);
+			if (downlink != nullptr) { *downlink = chosen; }
+
 			RequestRefresh();
 			return;
 		}
@@ -2976,6 +3375,18 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 		}
 	}
 
+	// The CPDLC category flyout. The callsign comes from the menu rather than from the
+	// selected aircraft, so choosing an option cannot address the uplink to whichever tag
+	// happened to be clicked while the menu was open.
+	if (ObjectType == BUTTON_MENU_CPDLC_OPTION) {
+		const std::string cs = menuState.CPDLCMenuData.callsign;
+		menuState.MB3menu = false;
+		menuState.MB3hoverOn = false;
+		ComposeCPDLCUplink(sObjectId, cs);
+		RequestRefresh();
+		return;
+	}
+
 	if (ObjectType == BUTTON_MENU_RMB_MENU_SECONDARY) {
 		if (!strcmp(menuState.MB3SecondaryMenuType.c_str(), "ManHandoff")) {
 			menuState.MB3menu = false;
@@ -3001,7 +3412,7 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 		}
 		if (!strcmp(menuState.MB3SecondaryMenuType.c_str(), "CPDLCMenu")) {
 			menuState.MB3menu = false;
-			SendCPDLCUplink(sObjectId);
+			ComposeCPDLCUplink(sObjectId, GetPlugIn()->FlightPlanSelectASEL().GetCallsign());
 		}
 		if (!strcmp(menuState.MB3SecondaryMenuType.c_str(), "SetComm")) {
 			menuState.MB3menu = false;
@@ -3526,9 +3937,15 @@ void CSiTRadar::OnOverScreenObject(int ObjectType,
 			menuState.MB3SecondaryMenuOn = false;
 			menuState.MB3SecondaryMenuType = sObjectId;
 
+			// Every entry that has a flyout has to be named here. "CPDLCMenu" was
+			// missing, so MB3SecondaryMenuOn never became true for it, the submenu was
+			// never drawn, and because hit rectangles are registered while drawing, its
+			// three options were never clickable - the whole manual CPDLC menu was
+			// unreachable, with nothing on screen to show that it was.
 			if (!strcmp(sObjectId, "ManHandoff")  ||
 				!strcmp(sObjectId, "ModSFI") ||
 				!strcmp(sObjectId, "SetComm") ||
+				!strcmp(sObjectId, "CPDLCMenu") ||
 				!strcmp(sObjectId, "PointOut")) {
 				menuState.MB3SecondaryMenuOn = true;
 				menuState.MB3SecondaryMenuType = sObjectId;
@@ -3538,7 +3955,7 @@ void CSiTRadar::OnOverScreenObject(int ObjectType,
 		}
 	}
 
-	if (ObjectType == BUTTON_MENU_RMB_MENU_SECONDARY) {
+	if (ObjectType == BUTTON_MENU_RMB_MENU_SECONDARY || ObjectType == BUTTON_MENU_CPDLC_OPTION) {
 		if (!EqualRect(&Area, &CPopUpMenu::prevRect)) {
 
 			CopyRect(&menuState.MB3hoverRect, &Area);

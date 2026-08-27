@@ -139,11 +139,56 @@ void CPopUpMenu::populateSecondaryMenu(string type) {
     }
 }
 
+// The messages behind each category button on the CPDLC window.
+//
+// This catalogue is compiled in rather than read from SituCPDLC.txt, unlike the canned
+// replies and the departure clearances. The difference is that every message here takes a
+// value out of the flight plan - a cleared level, an assigned speed, the next controller -
+// so a row in a config file would need a substitution language to say where the value
+// comes from. The wording is ICAO's and does not vary by unit; what did vary, and what is
+// in the file, is the geography.
+//
+// The function names are the contract with ComposeCPDLCUplink. Each must begin "CPDLC",
+// which is what routes a click here rather than into the radar context menu.
+void CPopUpMenu::populateCPDLCOptions(string category) {
+
+    // Drawn bottom up, so these read in reverse of their screen order.
+    if (category == "Radio") {
+        m_listElements.emplace_back(SPopUpElement("NEXT DATA AUTHORITY", "CPDLCNDA", 0, 0, 200));
+        m_listElements.emplace_back(SPopUpElement("CONTACT (UNIT) (FREQ)", "CPDLCContact", 0, 0, 200));
+        m_listElements.emplace_back(SPopUpElement("MONITOR (UNIT) (FREQ)", "CPDLCMonitor", 0, 0, 200));
+    }
+    else if (category == "Altitude") {
+        m_listElements.emplace_back(SPopUpElement("CONFIRM ASSIGNED ALTITUDE", "CPDLCConfALT", 0, 0, 200));
+        m_listElements.emplace_back(SPopUpElement("CLIMB TO AND MAINTAIN (ALT)", "CPDLCClimb", 0, 0, 200));
+        m_listElements.emplace_back(SPopUpElement("DESCEND TO AND MAINTAIN (ALT)", "CPDLCDescend", 0, 0, 200));
+    }
+    else if (category == "Speed") {
+        m_listElements.emplace_back(SPopUpElement("MAINTAIN (MACH)", "CPDLCMach", 0, 0, 200));
+        m_listElements.emplace_back(SPopUpElement("MAINTAIN (MACH) OR LESS", "CPDLCMach-", 0, 0, 200));
+        m_listElements.emplace_back(SPopUpElement("MAINTAIN (MACH) OR GREATER", "CPDLCMach+", 0, 0, 200));
+        m_listElements.emplace_back(SPopUpElement("MAINTAIN (SPEED)", "CPDLCSpeed", 0, 0, 200));
+        m_listElements.emplace_back(SPopUpElement("MAINTAIN (SPEED) OR LESS", "CPDLCSpeed-", 0, 0, 200));
+        m_listElements.emplace_back(SPopUpElement("MAINTAIN (SPEED) OR GREATER", "CPDLCSpeed+", 0, 0, 200));
+    }
+    else if (category == "Route") {
+        m_listElements.emplace_back(SPopUpElement("PROCEED DIRECT TO (FIX)", "CPDLCDirect", 0, 0, 200));
+    }
+    else if (category == "Radar") {
+        m_listElements.emplace_back(SPopUpElement("SURVEILLANCE SERVICES TERMINATED", "CPDLCServTerm", 0, 0, 200));
+    }
+
+    if (!m_listElements.empty()) {
+        m_listElements.emplace_back(SPopUpElement(category, category, 1, 0, 200));
+        m_width_ = m_listElements.at(0).m_width;
+    }
+}
+
 void CPopUpMenu::drawElement(SPopUpElement& element, POINT p) {
     int sDC = m_dc->SaveDC();
 
     m_dc->SelectObject(CFontHelper::Segoe14);
-    m_dc->SetTextColor(RGB(230, 230, 230));
+    m_dc->SetTextColor(this->textColor);
 
     //default is unpressed state
     COLORREF pressedcolor = RGB(66, 66, 66);
