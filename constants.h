@@ -191,6 +191,14 @@ const int CPDLC_ROW_TEXT_CHARS = 25;
 // It existed as an int written to zero in two places and read nowhere. These are what it
 // means now: an aircraft that has asked to log on is distinguishable from one that never
 // has, which is the difference between the Connect button being worth pressing and not.
+// Which handler an async message from a worker thread is displayed under. CAsyncResponse
+// carries this because a worker cannot call DisplayUserMessage itself.
+// 0 and 1 are both already emitted by wxRadar for weather and METAR problems and must
+// keep going to the warning handler; CPDLC takes the next free value rather than
+// renumbering them.
+const int ASYNC_MESSAGE_WARNING = 0;
+const int ASYNC_MESSAGE_CPDLC = 2;
+
 const int CPDLC_NOT_CONNECTED = 0;
 const int CPDLC_CONNECTED = 1;
 const int CPDLC_LOGON_REQUESTED = 2;

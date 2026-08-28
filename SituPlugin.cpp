@@ -18,8 +18,8 @@ size_t jurisdictionIndex = 0;
 size_t oldJurisdictionSize = 0;
 
 POINT SituPlugin::prevMousePt = { 0,0 };
-int SituPlugin::prevMouseDelta = 0;
 bool SituPlugin::mouseAtRest = false;
+clock_t SituPlugin::lastHaloRefresh = 0;
 
 HHOOK appHook;
 HHOOK mouseHook;
@@ -530,8 +530,20 @@ LRESULT CALLBACK MouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
                 }
             }
             if (CSiTRadar::menuState.haloCursor) {
-                SituPlugin::prevMouseDelta++;
-                // if starting from stationary, refresh right away
+
+                // Redraws are limited by elapsed time, not by a count of mouse messages.
+                //
+                // The old throttle was "every fifth WM_MOUSEMOVE", which sounds like a
+                // limit and is not one: nothing bounds how fast those five arrive. Each
+                // full scope repaint finishes, the pump dispatches the moves that queued
+                // behind it, the fifth asks for another repaint, and around it goes. The
+                // loop runs exactly as fast as the machine can redraw the entire screen -
+                // every target, every tag, the weather raster - which is why the README
+                // says CPU use rises dramatically with the halo on, and why it can starve
+                // the message pump enough to stop other EuroScope windows opening.
+                //
+                // A ceiling in milliseconds is the thing that was missing. Thirty a
+                // second looks identical on a cursor and is a real bound.
                 if (deltaPx == 0 && deltaPy == 0)
                 {
                     SituPlugin::mouseAtRest = true;
@@ -540,19 +552,18 @@ LRESULT CALLBACK MouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     SituPlugin::mouseAtRest = false;
                 }
 
-                if (SituPlugin::mouseAtRest) {
-                    // if at rest, trigger a refresh on first move
-                    if (CSiTRadar::m_pRadScr != nullptr) {
-                        CSiTRadar::m_pRadScr->RequestRefresh();
-                    }
-                }
+                const clock_t now = clock();
+                const bool intervalElapsed =
+                    ((now - SituPlugin::lastHaloRefresh) * 1000 / CLOCKS_PER_SEC)
+                        >= SituPlugin::kHaloRefreshIntervalMs;
 
-                // only draw every n WM_MOUSEMOVES
-                if (SituPlugin::prevMouseDelta > 4) {
+                // Moving off from stationary still redraws at once, so the halo does not
+                // lag behind the first movement by up to a frame.
+                if (SituPlugin::mouseAtRest || intervalElapsed) {
                     if (CSiTRadar::m_pRadScr != nullptr) {
                         CSiTRadar::m_pRadScr->RequestRefresh();
                     }
-                    SituPlugin::prevMouseDelta = 0;
+                    SituPlugin::lastHaloRefresh = now;
                 }
             }
         }
