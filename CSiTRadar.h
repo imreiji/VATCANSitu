@@ -23,6 +23,7 @@
 #include "TbsConfig.h"
 #include "CpdlcStations.h"
 #include "CpdlcFreetext.h"
+#include "CpdlcErrors.h"
 #include "SettingsFile.h"
 #include "SituFiles.h"
 #include "SituLegacy.h"
@@ -282,7 +283,14 @@ public:
     // thread attaches the results to mAcData in DrainCPDLCPoll.
     struct SCPDLCPollResult {
         std::vector<CPDLCMessage> messages;
+
+        // The reply verbatim when it was not "ok", and what it means. Kept apart because
+        // what to do about a failure depends entirely on which kind it is - a timeout
+        // and a rejected logon code are not the same event and used to be treated as
+        // one. See CpdlcErrors.h.
         std::string error;
+        SituCpdlcErrors::Severity severity{ SituCpdlcErrors::Ok };
+
         bool ready{ false };
     };
 
@@ -292,6 +300,12 @@ public:
 
     // Kicks off a poll if one is not already running. Returns immediately.
     static void StartCPDLCPoll();
+
+    // How many consecutive fetches have failed, and what was last said about it. Used to
+    // report a failure once rather than once a minute, and to give up on a fault that
+    // never clears. Reset by a successful fetch.
+    static int cpdlcConsecutiveFailures;
+    static std::string cpdlcLastReportedError;
 
     // Main thread only. Applies whatever the last poll produced.
     void DrainCPDLCPoll();

@@ -23,6 +23,8 @@ std::shared_mutex CSiTRadar::acCapabilityMutex;
 CSiTRadar::SCPDLCPollResult CSiTRadar::cpdlcPollResult;
 std::mutex CSiTRadar::cpdlcPollMutex;
 bool CSiTRadar::cpdlcPollInFlight = false;
+int CSiTRadar::cpdlcConsecutiveFailures = 0;
+std::string CSiTRadar::cpdlcLastReportedError;
 
 void CSiTRadar::StartCPDLCPoll()
 {
@@ -36,9 +38,10 @@ void CSiTRadar::StartCPDLCPoll()
 		std::string raw = CPDLCMessage::PollCPDLCMessages();
 
 		SCPDLCPollResult result;
+		result.severity = SituCpdlcErrors::Classify(raw);
 
-		if (raw.compare(0, 2, "ok") != 0) {
-			result.error = "Hoppie Error, Try Reconnecting Error:" + raw;
+		if (result.severity != SituCpdlcErrors::Ok) {
+			result.error = raw;
 		}
 		else if (raw.compare(0, 3, "ok ") == 0) {
 			// parseDLMessage consumes from the front of raw, and now always shortens it,
@@ -57,7 +60,17 @@ void CSiTRadar::StartCPDLCPoll()
 		// it must not change between those two points. Upstream flips it in the button
 		// handler and never sets it back, so a logoff and logon in the same session skipped
 		// the peek entirely; the logon handler now re-arms it.
-		CPDLCMessage::firstPeek = false;
+		//
+		// Only on success, and that condition is new. It did not matter while any failure
+		// disabled CPDLC, because re-enabling re-armed the flag. Now that a failed fetch
+		// is retried instead, flipping it unconditionally would spend the peek on a
+		// request that never reached Hoppie: the retry a minute later would be a poll,
+		// which consumes, and parseDLMessage would not strip the leading message id that
+		// only a peek reply carries. Every field of every message in that batch would
+		// shift by one.
+		if (result.severity == SituCpdlcErrors::Ok) {
+			CPDLCMessage::firstPeek = false;
+		}
 
 		std::lock_guard<std::mutex> lock(cpdlcPollMutex);
 		cpdlcPollResult = result;
@@ -76,37 +89,93 @@ void CSiTRadar::DrainCPDLCPoll()
 		if (!cpdlcPollResult.ready) { return; }
 		result.messages.swap(cpdlcPollResult.messages);
 		result.error.swap(cpdlcPollResult.error);
+		result.severity = cpdlcPollResult.severity;
 		cpdlcPollResult.ready = false;
 	}
 
 	// Everything below touches the EuroScope SDK or mAcData, so it only runs here.
-	if (!result.error.empty()) {
-		menuState.CPDLCOn = false;
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Hoppie CPDLC", result.error.c_str(),
-			true, false, false, false, false);
+	//
+	// What a failure means decides what to do about it. Every non-"ok" reply used to
+	// disable CPDLC until the controller noticed and clicked the button again, which is
+	// right for a rejected logon code and wrong for everything else - a single response
+	// over the 2500 ms timeout ended a controller's datalink for the rest of the session.
+	if (result.severity != SituCpdlcErrors::Ok) {
+
+		const bool fatal = (result.severity == SituCpdlcErrors::Fatal)
+			|| (result.severity == SituCpdlcErrors::Transient
+				&& ++cpdlcConsecutiveFailures >= SituCpdlcErrors::kTransientFailureLimit);
+
+		// An operational refusal - another controller holding the station callsign - is
+		// not counted, because it can legitimately persist for a whole session and
+		// giving up on it after ten minutes would be wrong.
+		if (result.severity == SituCpdlcErrors::Operational) { cpdlcConsecutiveFailures = 0; }
+
+		std::string text = SituCpdlcErrors::Describe(result.error, result.severity);
+
+		if (fatal) {
+			menuState.CPDLCOn = false;
+			if (result.severity != SituCpdlcErrors::Fatal) {
+				text = "CPDLC stopped after " + std::to_string(cpdlcConsecutiveFailures)
+					+ " failed fetches: " + result.error;
+			}
+		}
+
+		// Said once, not once a minute. A failure that persists is still a single line
+		// in the chat area, and a changed failure is a new one.
+		if (fatal || text != cpdlcLastReportedError) {
+			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Hoppie CPDLC", text.c_str(),
+				true, false, false, false, false);
+			cpdlcLastReportedError = text;
+		}
+
+		if (fatal) { cpdlcConsecutiveFailures = 0; cpdlcLastReportedError.clear(); }
 		return;
 	}
 
-	for (auto& message : result.messages) {
-		auto aircraft = mAcData.find(message.sender);
-		if (aircraft == mAcData.end()) { continue; }
+	// Recovered, or never broken. Say so only if something was said about a failure.
+	if (!cpdlcLastReportedError.empty()) {
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Hoppie CPDLC",
+			"CPDLC fetch recovered.", true, false, false, false, false);
+		cpdlcLastReportedError.clear();
+	}
+	cpdlcConsecutiveFailures = 0;
 
-		aircraft->second.CPDLCMessages.push_back(message);
+	for (auto& message : result.messages) {
+
+		// A sender we have no record of used to be dropped here, silently. mAcData holds
+		// only aircraft this scope has drawn, so a downlink from an aircraft that is off
+		// screen, filtered out, or simply has not appeared yet went nowhere at all - no
+		// message, no list entry, no error. An aircraft sending REQUEST LOGON is very
+		// often exactly that aircraft: nobody is tracking it, which is why it is asking.
+		if (message.sender.empty()) { continue; }
+
+		const bool firstSighting = (mAcData.find(message.sender) == mAcData.end());
+		ACData& aircraft = mAcData[message.sender];
+
+		aircraft.CPDLCMessages.push_back(message);
+
+		// With no tag on screen there is no mnemonic to raise and no window to open from,
+		// so the chat area is the only place this can surface.
+		if (firstSighting) {
+			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+				(message.sender + " (not on scope): " + message.rawMessageContent).c_str(),
+				true, true, false, false, false);
+		}
 
 		if (message.opensMnemonic) {
-			aircraft->second.cpdlcMnemonic = true;
+			aircraft.cpdlcMnemonic = true;
 		}
 		// Connection state. REQUEST LOGON is how an aircraft asks; LOGOFF is how it
 		// leaves. Until now this field was written to zero in one place and read
 		// nowhere, so the window could not tell an aircraft that had asked to connect
 		// from one that never had.
 		if (message.rawMessageContent == "REQUEST LOGON") {
-			if (aircraft->second.cpdlcState != CPDLC_CONNECTED) {
-				aircraft->second.cpdlcState = CPDLC_LOGON_REQUESTED;
+			if (aircraft.cpdlcState != CPDLC_CONNECTED) {
+				aircraft.cpdlcState = CPDLC_LOGON_REQUESTED;
 			}
 		}
 		else if (message.rawMessageContent == "LOGOFF") {
-			aircraft->second.cpdlcState = CPDLC_NOT_CONNECTED;
+			aircraft.cpdlcState = CPDLC_NOT_CONNECTED;
 		}
 	}
 }
@@ -483,7 +552,20 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 			while (it != mAcData.cend())
 			{
-				if (std::find(menuState.recentCallsignsSeen.begin(), menuState.recentCallsignsSeen.end(), it->first) == menuState.recentCallsignsSeen.end())
+				// An aircraft in an open CPDLC dialogue is kept even when it has no radar
+				// target. It is the same aircraft this sweep is designed to collect - one
+				// nobody can see - and an aircraft that has asked to log on is very often
+				// exactly that, which is why it is asking. Erasing it here would discard
+				// the request and the connection state five minutes after arrival, which
+				// is the drop this change removes, just on a timer.
+				//
+				// Bounded rather than unbounded: the state returns to CPDLC_NOT_CONNECTED
+				// on LOGOFF or when the controller ends the service, and the next sweep
+				// collects it then.
+				const bool inCpdlcDialogue = (it->second.cpdlcState != CPDLC_NOT_CONNECTED);
+
+				if (!inCpdlcDialogue
+					&& std::find(menuState.recentCallsignsSeen.begin(), menuState.recentCallsignsSeen.end(), it->first) == menuState.recentCallsignsSeen.end())
 				{
 					// supported in C++11
 					it = mAcData.erase(it);
