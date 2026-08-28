@@ -56,6 +56,14 @@ CAppWindows::CAppWindows(POINT origin, int winType, CFlightPlan& fp, RECT radare
 		b.windowID = m_windowId_;
 		m_buttons_.push_back(b);
 
+		// Send was the only button on this window, and it refuses when nothing is staged
+		// - so opening the editor by clicking a message, with no uplink composed, left a
+		// window whose one control declined to do anything and no way out of it. The
+		// parent's "Close Dialog" did close it, which is not discoverable from here.
+		b.location = { 365, 219 };
+		b.text = "Close";
+		m_buttons_.push_back(b);
+
 		// The downlink being replied to, and the uplink being composed.
 		STextField stf;
 		stf.m_parentWindowID = m_windowId_;
