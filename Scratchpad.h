@@ -38,9 +38,16 @@
 //
 // This is a third writer of the same field. It was added without knowledge of the SFI
 // layout above, so it simply prepended "RREQ " to whatever was already there and, when
-// toggled off, blanked the entire string before restoring part of it. The two features
-// corrupted each other: once a release was requested the SFI stopped parsing, because the
-// string no longer began with a space.
+// toggled off, blanked the entire string before restoring part of it.
+//
+// The two features could not both work: SFI detection requires a leading space, and a
+// requested release put "RREQ " in front of it, so the SFI stopped parsing for any
+// aircraft with both set. That is a property of the code as written rather than an
+// incident anybody reported - it was deduced from reading these two paths, and no
+// controller report of it is on record. Stated that way round deliberately: the earlier
+// wording here said the features "corrupted each other" in the past tense, which claims
+// an observation this file never had. The code made it certain for anyone who used both;
+// whether anyone did is unknown.
 //
 // The prefix is kept exactly as it is on the wire. What changes is that it is now parsed
 // back out before the SFI and remarks are read, which is what the existing byte layout

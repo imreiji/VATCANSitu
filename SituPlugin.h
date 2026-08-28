@@ -1,5 +1,6 @@
 #pragma once
 #include <EuroScopePlugIn.h>
+#include <ctime>
 #include <vector>
 #include <string>
 
@@ -78,7 +79,15 @@ public:
     static void SendKeyboardPresses(std::vector<WORD> message);
     static void SendKeyboardString(std::string str);
     static POINT prevMousePt;
-    static int prevMouseDelta;
     static bool mouseAtRest;
+
+    // When the halo last forced a redraw. The throttle above it counts mouse messages,
+    // which puts no ceiling on the refresh rate at all - see the comment in MouseProc.
+    static clock_t lastHaloRefresh;
+
+    // Milliseconds between halo driven redraws. About 30 per second: fast enough that
+    // the halo tracks the cursor smoothly, and an actual limit, which counting messages
+    // is not.
+    static const int kHaloRefreshIntervalMs = 33;
 
 };

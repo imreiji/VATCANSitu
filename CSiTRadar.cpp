@@ -480,7 +480,10 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 	// this used to iterate the shared vector while worker threads could push_back into it,
 	// which reallocates and invalidates the iterator being walked here.
 	for (const auto& message : wxRadar::TakeAsyncMessages()) {
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Warning", message.reponseMessage.c_str(), true, false, false, false, false);
+		// A failed uplink belongs under CPDLC with the rest of that conversation, not in
+		// the weather warnings.
+		const char* handler = (message.responseCode == ASYNC_MESSAGE_CPDLC) ? "CPDLC" : "Warning";
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", handler, message.reponseMessage.c_str(), true, false, false, false, false);
 	}
 
 #pragma region timers
@@ -694,7 +697,11 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 				// Draw the mouse halo before menu, so it goes behind it
 				if (menuState.haloCursor == true) {
 					HaloTool::drawHalo(&dc, p, menuState.haloRad, pixnm);
-					SituPlugin::prevMouseDelta = 0; // sync refrehes
+					// Time the interval from the last halo actually drawn rather than
+					// from the last one requested, so a redraw triggered by something
+					// else - a menu, a click - does not leave the hook asking for
+					// another one immediately afterwards.
+					SituPlugin::lastHaloRefresh = clock();
 				}
 
 				// Convert any position carried over from an older settings file, and keep
@@ -2270,13 +2277,33 @@ void CSiTRadar::DispatchCPDLCUplink(CPDLCMessage uplink, const std::string& call
 {
 	const std::string preview = uplink.rawMessageContent;
 
-	std::thread send([uplink]() mutable { uplink.SendCPDLCMessage(); });
+	// SendCPDLCMessage sets `sent` on whichever object it was called on, and the worker
+	// gets a copy - so the result was set on the copy and thrown away when the thread
+	// ended. Nothing anywhere read it. A clearance that Hoppie refused, or that never
+	// left the machine, was recorded in the message list and announced to the controller
+	// exactly like one that arrived: "CZQM: CLIMB TO AND MAINTAIN FL350", and no aircraft
+	// had heard it.
+	//
+	// The worker cannot say so itself - DisplayUserMessage is an SDK call and this is not
+	// the main thread - so it goes on the async queue, which OnRefresh drains.
+	std::thread send([uplink, callsign]() mutable {
+		uplink.SendCPDLCMessage();
+		if (uplink.sent) { return; }
+
+		CAsyncResponse failure;
+		failure.responseCode = ASYNC_MESSAGE_CPDLC;
+		failure.reponseMessage = callsign + ": NOT SENT - " + uplink.rawMessageContent;
+		wxRadar::PushAsyncMessage(failure);
+		});
 	send.detach();
 
 	mAcData[callsign].CPDLCMessages.push_back(uplink);
 
+	// "sending", not "sent". Whether it arrived is not known for up to five seconds, and
+	// a failure line follows if it did not. Success stays quiet rather than putting two
+	// lines in the chat area for every uplink.
 	GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-		(callsign + ": " + preview).c_str(), true, true, false, false, false);
+		(callsign + ": sending - " + preview).c_str(), true, true, false, false, false);
 
 	RequestRefresh();
 }
