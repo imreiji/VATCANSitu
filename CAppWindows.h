@@ -200,9 +200,34 @@ struct SListBox {
 		}
 	}
 	void PopulateCPDLCListBox(const vector<CPDLCMessage>& msgs) {
-		listBox_.clear(); // rebuilt from scratch on every refresh
+
+		// Rebuilt from scratch on every refresh, so that a window left open shows
+		// messages that arrived after it was opened. That costs the selection unless it
+		// is carried across: element ids are reissued on every rebuild, so the row the
+		// controller clicked stopped looking selected about a second later while the
+		// editor below it still held the message. Matched on what identifies a message
+		// rather than on its position in the list, which shifts as messages arrive.
+		CPDLCMessage wasSelected;
+		bool hadSelection = false;
+		for (const auto& element : listBox_) {
+			if (element.m_selected_) {
+				wasSelected = element.m_cpdlc_message;
+				hadSelection = true;
+				break;
+			}
+		}
+
+		listBox_.clear();
 		for (const auto& msg : msgs) {
-			listBox_.emplace_back(SListBoxElement(330, msg));
+			SListBoxElement element(330, msg);
+			if (hadSelection
+				&& msg.messageID == wasSelected.messageID
+				&& msg.isdlMessage == wasSelected.isdlMessage
+				&& msg.timeParsed == wasSelected.timeParsed
+				&& msg.rawMessageContent == wasSelected.rawMessageContent) {
+				element.m_selected_ = true;
+			}
+			listBox_.emplace_back(element);
 		}
 	}
 	void PopulateDirectListBox(ACRoute* rte, CFlightPlan fp) {

@@ -98,6 +98,20 @@ struct SFocusItem {
     unsigned long m_text_field_id{ 0 };
 };
 
+// What a CPDLC category button asked for, held between the click that opened the menu and
+// the draw that renders it.
+//
+// The callsign is carried explicitly rather than read from the selected aircraft at draw
+// time. The CPDLC window is not modal and does not follow the selection, so a controller
+// can open the menu on one aircraft and click another tag before choosing an option -
+// composing the uplink for whoever happened to be selected would address it to the wrong
+// aeroplane, which is the one failure this window cannot be allowed to have.
+struct SCPDLCMenuData {
+    std::string func;
+    std::string callsign;
+    POINT pt{ 0, 0 };
+};
+
 struct SFreeText {
     int m_id{0};
     CPosition m_pos;
@@ -177,9 +191,14 @@ struct buttonStates {
     RECT MB3primRect{};
     bool MB3SecondaryMenuOn{ true };
     bool MB3hoverOn{ false };
-    int MB3menuType{ 0 }; // 0 for AC, 1 for freetext, more if needed
+    int MB3menuType{ 0 }; // 0 for AC, 1 for the CPDLC categories, more if needed
     int freetextselectedID{};
     string MB3SecondaryMenuType{};
+
+    // The CPDLC category menu is opened by a button inside the CPDLC window rather than
+    // by a right click on a tag, so it has no aircraft under the cursor to work from and
+    // carries its own anchor and callsign.
+    SCPDLCMenuData CPDLCMenuData;
     string SFIPrefString{};
     string SFIPrefStringASRSetting{};
     string SFIPrefStringDefault{ "ABCDEFGHIJ" };
@@ -478,8 +497,13 @@ protected:
     static void ClampListOffset(ACList& list, const RECT& radarea);
     static void ResolveListOffsets(const RECT& radarea);
 
-    // Composes and sends one manual CPDLC uplink from the callsign menu.
-    void SendCPDLCUplink(const std::string& which);
+    // Composes one CPDLC uplink and stages it in the editor for review.
+    //
+    // Nothing here sends. Every message with a value in it - a level, a speed, a Mach
+    // number, a next authority - is composed from what EuroScope holds for the aircraft,
+    // and the controller has to be able to see that value before it goes to an aeroplane.
+    // The Send button in the editor is the only thing that transmits.
+    void ComposeCPDLCUplink(const std::string& which, const std::string& callsign);
 
     // Sends one composed uplink on a worker and records it against the aircraft. The
     // network call is an HTTP round trip and does not belong on the thread that draws.
@@ -494,9 +518,34 @@ protected:
 
     void AcceptCPDLCLogon(const std::string& callsign);
     void EndCPDLCService(const std::string& callsign);
+
+    // The wording and reply type that end the service, from the [FREETEXT] row marked
+    // UNICOM. Both the compose and the send read it, so an edited file cannot leave a
+    // message that reads as a termination but does not act as one.
+    std::string TerminatingMessageText();
+    std::string TerminatingReplyType();
+
+    // Composes a departure clearance for the aircraft and stages it.
+    void ComposeCPDLCPdc(const std::string& callsign);
     void SendCPDLCFreetext(const std::string& callsign, const std::string& label);
     void CloseCPDLCEditor(const std::string& callsign);
     void OpenCPDLCEditor(const std::string& callsign, POINT at);
+
+    // Opens the editor if it is not already open, and writes the composed uplink into its
+    // pending field. Nothing is transmitted.
+    void StageCPDLCUplink(const std::string& callsign, const CPDLCMessage& uplink);
+
+    // The editor's two message fields for an aircraft, or null when no editor is open.
+    // Field 0 is the downlink being answered, field 1 the uplink being composed.
+    CPDLCMessage* SelectedDownlink(const std::string& callsign);
+    CPDLCMessage* StagedUplink(const std::string& callsign);
+
+    // Transmits whatever is staged in the given editor window and closes it.
+    void SendStagedCPDLCUplink(int editorWindowId);
+
+    // Opens the category flyout - Altitude, Speed, Route and the rest - anchored under
+    // the button that asked for it.
+    void OpenCPDLCCategoryMenu(const std::string& callsign, const std::string& category, POINT at);
 
     // helper functions
     clock_t time = clock();

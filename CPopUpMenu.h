@@ -38,7 +38,11 @@ public:
 	CDC* m_dc;
 	static RECT prevRect;
 	static RECT totalRect;
-	int m_width_;
+	int m_width_{ 115 };
+
+	// Menus drawn from the CPDLC window use the same green as its buttons, so the flyout
+	// reads as part of that window rather than as a radar context menu.
+	COLORREF textColor{ RGB(230, 230, 230) };
 
 	CPopUpMenu(POINT p) {
 		m_origin = p;
@@ -55,5 +59,9 @@ public:
 	void populateMenu();
 	void drawElement(SPopUpElement& element, POINT p);
 	void populateSecondaryMenu(string type);
+
+	// The options behind one CPDLC category button. Left empty for a category with
+	// nothing assigned to it, which the caller checks before drawing a menu with no rows.
+	void populateCPDLCOptions(string category);
 };
 

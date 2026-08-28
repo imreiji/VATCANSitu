@@ -97,6 +97,12 @@ const int BUTTON_MENU_PTL_EB = 236;
 const int BUTTON_MENU_RMB_MENU = 240;
 const int BUTTON_MENU_RMB_MENU_SECONDARY = 241;
 
+// The CPDLC category flyout. Its own type rather than a reuse of the secondary radar
+// menu: that one identifies itself through menuState.MB3SecondaryMenuType, which
+// OnOverScreenObject rewrites on every hover over the primary menu, and a shared string
+// is not something to hang an uplink's destination on.
+const int BUTTON_MENU_CPDLC_OPTION = 242;
+
 const int BUTTON_MENU_SETUP = 254;
 
 const int BUTTON_MENU_TBS_HDG = 250;
