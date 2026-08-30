@@ -1057,23 +1057,19 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		RECT uline2{};
 		RECT uline3{};
 
-		// An uncorrelated ADS-B target is broadcasting its own identity, so show it.
-		// Nothing has confirmed that identity - there is no flight plan behind it - which
-		// is why it is drawn in full rather than shortened the way a correlated Canadian
-		// registration is. What is on the tag is exactly what the aircraft is sending.
-		if (CSiTRadar::mAcData[rt->GetCallsign()].isADSB)
-		{
-			RECT ucs{};
-			ucs.top = p.y - 31;
-			ucs.left = p.x + 10;
+		// An uncorrelated ADS-B target is broadcasting its own identity, so it gets a
+		// third line and the block reads squawk, callsign, altitude:
+		//
+		//     2000
+		//     CGNQC
+		//     055
+		//
+		// Which pushes the squawk up a line. Everything else uncorrelated keeps the two
+		// line block it has always had, so a primary or a plain SSR return does not grow
+		// an empty row.
+		const bool adsbIdentity = CSiTRadar::mAcData[rt->GetCallsign()].isADSB;
 
-			const std::string adsbCallsign = rt->GetCallsign();
-			dc->DrawText(adsbCallsign.c_str(), &ucs, DT_LEFT | DT_CALCRECT);
-			dc->DrawText(adsbCallsign.c_str(), &ucs, DT_LEFT);
-			rad->AddScreenObject(TAG_ITEM_TYPE_CALLSIGN, rt->GetCallsign(), ucs, TRUE, rt->GetCallsign());
-		}
-
-		uline0.top = p.y - 19;
+		uline0.top = adsbIdentity ? (p.y - 31) : (p.y - 19);
 		uline0.left = p.x + 10;
 		if (CSiTRadar::halfSecTick && CSiTRadar::mAcData[rt->GetCallsign()].multipleDiscrete)
 		{
@@ -1082,6 +1078,21 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		dc->DrawText(ssr.c_str(), &uline0, DT_LEFT | DT_CALCRECT);
 		dc->DrawText(ssr.c_str(), &uline0, DT_LEFT);
 		rad->AddScreenObject(TAG_ITEM_TYPE_SQUAWK, rt->GetCallsign(), uline0, TRUE, "");
+
+		if (adsbIdentity)
+		{
+			RECT ucs{};
+			ucs.top = p.y - 19;
+			ucs.left = p.x + 10;
+
+			// In full, never shortened. A correlated Canadian registration loses its
+			// nationality C because a flight plan says who the aircraft is; here nothing
+			// does, so the tag shows exactly what is being broadcast and nothing else.
+			const std::string adsbCallsign = rt->GetCallsign();
+			dc->DrawText(adsbCallsign.c_str(), &ucs, DT_LEFT | DT_CALCRECT);
+			dc->DrawText(adsbCallsign.c_str(), &ucs, DT_LEFT);
+			rad->AddScreenObject(TAG_ITEM_TYPE_CALLSIGN, rt->GetCallsign(), ucs, TRUE, rt->GetCallsign());
+		}
 
 		uline1.top = p.y - 7;
 		uline1.left = p.x + 10;
