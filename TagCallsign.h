@@ -1,5 +1,8 @@
 #pragma once
 
+// Text rules for data tag fields. Pure string work, no SDK types, so the decisions can
+// be tested without loading the plugin into EuroScope.
+//
 // How a callsign is written on a data tag.
 //
 // Canadian civil registrations are C-Gxxx, C-Fxxx and C-Ixxx. They reach the plugin from
@@ -47,5 +50,31 @@ namespace SituTag
     {
         if (!IsCanadianRegistration(callsign)) { return callsign; }
         return callsign.substr(1);
+    }
+
+    // The VFR conspicuity code. An aircraft on it is announcing that it is VFR whatever
+    // the flight plan says, which is why it counts here alongside the flight plan flag.
+    const char* const kVfrSquawk = "1200";
+
+    // What the jurisdiction field shows on the tag - normally a controller's position id.
+    //
+    // A VFR aircraft nobody is tracking has no position id to show, so the field sits
+    // empty and the tag gives no hint why. It shows "VF" instead: the aircraft is VFR and
+    // unowned, which is a state rather than an absence.
+    //
+    // Two guards, and both matter. It only fills a field that is already empty, so a real
+    // handoff or tracking id is never overwritten by this - if there is a controller to
+    // name, naming them wins. And it requires that nobody is tracking, so an aircraft
+    // being worked by someone else is never labelled unowned just because this scope has
+    // no handoff in progress with it.
+    inline bool ShowsVfrJurisdiction(bool hasVfrFlightPlan,
+                                     const std::string& squawk,
+                                     const std::string& trackingControllerId,
+                                     const std::string& jurisdictionField)
+    {
+        if (!jurisdictionField.empty()) { return false; }
+        if (!trackingControllerId.empty()) { return false; }
+
+        return hasVfrFlightPlan || squawk == kVfrSquawk;
     }
 }

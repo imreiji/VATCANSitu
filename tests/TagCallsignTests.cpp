@@ -115,6 +115,39 @@ int main()
     //     ever arrives with it, leaving it alone is safer than assuming the format.
     CheckEqual("C-GABC", "C-GABC");
 
+    // --- The VF jurisdiction marker. A truth table rather than examples, because the
+    //     rule has four inputs and getting one wrong writes over a controller's id.
+    {
+        // VFR flight plan, nobody tracking, field empty -> VF.
+        Check(ShowsVfrJurisdiction(true, "4321", "", ""), "VFR flight plan and unowned");
+
+        // Squawking 1200 counts even without a VFR flight plan.
+        Check(ShowsVfrJurisdiction(false, "1200", "", ""), "1200 and unowned");
+        Check(ShowsVfrJurisdiction(true, "1200", "", ""), "both");
+
+        // IFR on a discrete code is not VFR.
+        Check(!ShowsVfrJurisdiction(false, "4321", "", ""), "IFR on a discrete is not VFR");
+        Check(!ShowsVfrJurisdiction(false, "", "", ""), "no squawk at all is not VFR");
+
+        // Somebody is tracking it, so it is owned - never labelled unowned.
+        Check(!ShowsVfrJurisdiction(true, "1200", "QM", ""), "tracked by another controller");
+        Check(!ShowsVfrJurisdiction(true, "1200", "ZZ", ""), "tracked by anyone at all");
+
+        // The field already has something in it. A real position id always wins; this
+        // rule only fills a blank.
+        Check(!ShowsVfrJurisdiction(true, "1200", "", "QM"), "never overwrites a handoff id");
+        Check(!ShowsVfrJurisdiction(true, "1200", "", "ZZ"), "nor any other id");
+
+        // Both guards at once, which is the case that would be worst to get wrong.
+        Check(!ShowsVfrJurisdiction(true, "1200", "QM", "ZZ"), "tracked and with an id shown");
+
+        // 1200 is matched exactly. A code that merely resembles it is not the
+        // conspicuity code.
+        Check(!ShowsVfrJurisdiction(false, "12000", "", ""), "12000 is not 1200");
+        Check(!ShowsVfrJurisdiction(false, "0120", "", ""), "nor is 0120");
+        Check(!ShowsVfrJurisdiction(false, "1201", "", ""), "nor is 1201");
+    }
+
     std::cout << "\n" << (g_checks - g_failures) << "/" << g_checks << " checks passed\n";
 
     if (g_failures != 0)

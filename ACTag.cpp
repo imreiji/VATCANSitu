@@ -354,6 +354,18 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 	{
 		handoffCJS = fp->GetTrackingControllerId();
 	}
+
+	// A VFR aircraft nobody is tracking shows "VF" where a controller's position id would
+	// go. The field was simply blank, which reads the same as an aircraft whose
+	// jurisdiction has not loaded yet; "VF" says the state is known and it is unowned.
+	//
+	// Only ever fills a field that is already empty, and only when nobody is tracking, so
+	// a real handoff or tracking id is never replaced. See ShowsVfrJurisdiction.
+	if (SituTag::ShowsVfrJurisdiction(CSiTRadar::mAcData[rt->GetCallsign()].hasVFRFP,
+		ssr, fp->GetTrackingControllerId(), handoffCJS))
+	{
+		handoffCJS = "VF";
+	}
 	string groundSpeed = to_string((rt->GetPosition().GetReportedGS() + 5) / 10);
 	string setSpeed = to_string(fp->GetControllerAssignedData().GetAssignedSpeed());
 	string setMach = to_string(fp->GetControllerAssignedData().GetAssignedMach());
