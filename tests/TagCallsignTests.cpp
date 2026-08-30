@@ -128,7 +128,10 @@ int main()
 
         // Agrees -> nothing to say, so nothing is drawn.
         Check(!ShowsSquawkOnTag(true, "4321", "4321"), "code matches the assignment");
-        Check(!ShowsSquawkOnTag(true, "0000", "0000"), "both unassigned is not a mismatch");
+        // 0000 means "unset" on the assignment side only. A target squawking it is
+        // squawking something, and that something is worth showing.
+        Check(ShowsSquawkOnTag(true, "0000", "0000"), "squawking 0000 with nothing assigned");
+        Check(ShowsSquawkOnTag(true, "0000", "4321"), "squawking 0000 against an assignment");
 
         // Not ADS-B -> never. A conventional correlated target squawks its assignment by
         // definition of how it got correlated, and the old behaviour stands.

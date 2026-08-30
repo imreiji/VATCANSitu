@@ -68,14 +68,14 @@ namespace SituTag
                                  const std::string& assignedCode)
     {
         if (!isAdsb) { return false; }
+        if (transponderCode.empty()) { return false; }
 
-        // "0000" is what an unset code looks like on either side, so it is treated the
-        // same as an empty string in both directions. A target squawking it has nothing
-        // worth printing, and an assignment of it is not an assignment.
-        const bool squawking = !transponderCode.empty() && transponderCode != "0000";
+        // "0000" means unset on the assignment side only. On the transponder side it is
+        // a real observation and one worth showing: an aircraft squawking 0000 against
+        // an assignment of 4321 is exactly the disagreement this exists to surface, and
+        // one squawking it with nothing assigned is still squawking nothing, which the
+        // controller wants to see rather than have hidden as noise.
         const bool assigned = !assignedCode.empty() && assignedCode != "0000";
-
-        if (!squawking) { return false; }
         if (!assigned) { return true; }
 
         return transponderCode != assignedCode;
