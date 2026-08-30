@@ -115,6 +115,31 @@ int main()
     //     ever arrives with it, leaving it alone is safer than assuming the format.
     CheckEqual("C-GABC", "C-GABC");
 
+    // --- Showing the transponder code on a correlated ADS-B tag.
+    {
+        // Disagrees with the assignment -> show it. This is the case the feature exists
+        // for: ADS-B correlation does not care about the code, so it can be wrong.
+        Check(ShowsSquawkOnTag(true, "1200", "4321"), "code differs from assignment");
+        Check(ShowsSquawkOnTag(true, "4321", "4322"), "one digit out still differs");
+
+        // No assignment to agree with.
+        Check(ShowsSquawkOnTag(true, "4321", ""), "no assigned code at all");
+        Check(ShowsSquawkOnTag(true, "4321", "0000"), "0000 is not an assignment");
+
+        // Agrees -> nothing to say, so nothing is drawn.
+        Check(!ShowsSquawkOnTag(true, "4321", "4321"), "code matches the assignment");
+        Check(!ShowsSquawkOnTag(true, "0000", "0000"), "both unassigned is not a mismatch");
+
+        // Not ADS-B -> never. A conventional correlated target squawks its assignment by
+        // definition of how it got correlated, and the old behaviour stands.
+        Check(!ShowsSquawkOnTag(false, "1200", "4321"), "not ADS-B, not shown");
+        Check(!ShowsSquawkOnTag(false, "4321", ""), "not ADS-B even with no assignment");
+
+        // Nothing to show.
+        Check(!ShowsSquawkOnTag(true, "", "4321"), "no transponder code to print");
+        Check(!ShowsSquawkOnTag(true, "", ""), "nothing either side");
+    }
+
     // --- The VF jurisdiction marker. A truth table rather than examples, because the
     //     rule has four inputs and getting one wrong writes over a controller's id.
     {

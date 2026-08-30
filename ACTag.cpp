@@ -474,6 +474,11 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		// Line 0 - CPDLC mnemonic, above the callsign. Nothing else draws here on an alpha
 		// tag, so this displaces nothing. Blue for a downlink awaiting a controller,
 		// green for the last uplink sent.
+		RECT rline0;
+		rline0.top = line0.y;
+		rline0.left = line0.x;
+		rline0.bottom = line1.y;
+
 		if (CSiTRadar::mAcData[rt->GetCallsign()].cpdlcMnemonic
 			&& !CSiTRadar::mAcData[rt->GetCallsign()].CPDLCMessages.empty())
 		{
@@ -487,17 +492,35 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 				dc->SelectObject(CFontHelper::Euroscope14);
 				dc->SetTextColor(latest.isdlMessage ? C_CPDLC_BLUE : C_CPDLC_GREEN);
 
-				RECT rline0;
-				rline0.top = line0.y;
-				rline0.left = line0.x;
-				rline0.bottom = line1.y;
-
 				dc->DrawText(mnemonic.c_str(), &rline0, DT_LEFT | DT_CALCRECT);
 				dc->DrawText(mnemonic.c_str(), &rline0, DT_LEFT);
 				rad->AddScreenObject(TAG_CPDLC_MNEMONIC, rt->GetCallsign(), rline0, true, "CPDLC Mnemonic");
 
 				dc->RestoreDC(sDCMnemonic);
+
+				// Anything else on line 0 starts after the mnemonic rather than under it.
+				rline0.left = rline0.right + 5;
 			}
+		}
+
+		// The transponder code, when a correlated ADS-B target is not squawking what was
+		// assigned - or has nothing assigned. Correlation by broadcast identity does not
+		// involve the code, so it can be stale or simply wrong with nothing on the tag to
+		// show it. A conventional correlated target is squawking its assignment by virtue
+		// of how it got correlated, so it stays off the tag as before.
+		if (SituTag::ShowsSquawkOnTag(CSiTRadar::mAcData[rt->GetCallsign()].isADSB,
+			ssr, fp->GetControllerAssignedData().GetSquawk()))
+		{
+			int sDCSquawk = dc->SaveDC();
+
+			dc->SelectObject(CFontHelper::Euroscope14);
+			dc->SetTextColor(C_PPS_YELLOW);
+
+			dc->DrawText(ssr.c_str(), &rline0, DT_LEFT | DT_CALCRECT);
+			dc->DrawText(ssr.c_str(), &rline0, DT_LEFT);
+			rad->AddScreenObject(TAG_ITEM_TYPE_SQUAWK, rt->GetCallsign(), rline0, TRUE, "");
+
+			dc->RestoreDC(sDCSquawk);
 		}
 
 		// Line 1

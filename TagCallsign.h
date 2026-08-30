@@ -52,6 +52,35 @@ namespace SituTag
         return callsign.substr(1);
     }
 
+    // Whether the transponder code belongs on a correlated aircraft's tag.
+    //
+    // Normally it does not: a correlated aircraft is squawking the code the flight plan
+    // assigned, so printing it again says nothing. An ADS-B correlated target is the
+    // exception. Correlation there can come from the aircraft's own broadcast identity
+    // rather than from its code, so the code is free to be anything - stale, never
+    // assigned, or simply wrong - and nothing on the tag would show it.
+    //
+    // So it is shown when it disagrees with the assignment, or when there is no
+    // assignment to agree with. "0000" counts as no assignment; it is what EuroScope
+    // carries for an unassigned code alongside the empty string.
+    inline bool ShowsSquawkOnTag(bool isAdsb,
+                                 const std::string& transponderCode,
+                                 const std::string& assignedCode)
+    {
+        if (!isAdsb) { return false; }
+
+        // "0000" is what an unset code looks like on either side, so it is treated the
+        // same as an empty string in both directions. A target squawking it has nothing
+        // worth printing, and an assignment of it is not an assignment.
+        const bool squawking = !transponderCode.empty() && transponderCode != "0000";
+        const bool assigned = !assignedCode.empty() && assignedCode != "0000";
+
+        if (!squawking) { return false; }
+        if (!assigned) { return true; }
+
+        return transponderCode != assignedCode;
+    }
+
     // The VFR conspicuity code. An aircraft on it is announcing that it is VFR whatever
     // the flight plan says, which is why it counts here alongside the flight plan flag.
     const char* const kVfrSquawk = "1200";
