@@ -1585,46 +1585,72 @@ void CACTag::DrawFPConnector(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlig
 
 void CACTag::DrawVMIArrow(CDC* dc, RECT& r, bool climbing)
 {
-	// Narrow enough to sit where a single character did, so the rest of line 2 does not
-	// shift. The band comes from the line the caller is filling: top and bottom were set
-	// by the altitude DrawText immediately before this.
-	const int width = 7;
+	// Sized and placed from the font's own metrics rather than from constants.
+	//
+	// The first version used fixed insets into the rect and a head made of two strokes.
+	// Both were wrong at this size. The rect a DrawText leaves behind is the full line
+	// box - ascent, descent and internal leading - so an arrow spanning it stands taller
+	// than the digits either side and sits high against them. And a stroked head on an
+	// eight pixel arrow is two hairlines meeting at a point, which reads as a kink in
+	// the shaft rather than as an arrowhead.
+	//
+	// So: span the digits, not the line box, and fill the head.
+	TEXTMETRIC tm{};
+	dc->GetTextMetrics(&tm);
+
+	// Where the digits actually sit. Internal leading is the blank band above the caps,
+	// and the baseline is ascent below the top - between them is the glyph.
+	const int capTop = r.top + tm.tmInternalLeading;
+	const int baseline = r.top + tm.tmAscent;
+	const int height = baseline - capTop;
+
+	// One character wide, so the arrow occupies the same column a digit would and the
+	// vertical rate after it keeps its spacing.
+	const int width = (tm.tmAveCharWidth > 0) ? tm.tmAveCharWidth : 7;
 	r.right = r.left + width;
 
-	const int cx = r.left + (width / 2);
-	const int top = r.top + 3;
-	const int bottom = r.bottom - 3;
+	if (height < 4) { return; }
 
-	if (bottom <= top) { return; }
+	const int cx = r.left + (width / 2);
+
+	// A third of the arrow is head. Half its height either side gives a point of about
+	// ninety degrees, which stays legible when the whole thing is eight pixels tall.
+	int headH = height / 3;
+	if (headH < 3) { headH = 3; }
+	int headW = headH / 2 + 1;
+	if (headW > (width / 2)) { headW = width / 2; }
 
 	int sDC = dc->SaveDC();
 
 	// Same colour as the text around it, whatever the caller last set - white while a
 	// tag is blinking, yellow otherwise.
-	HPEN pen = CreatePen(PS_SOLID, 1, dc->GetTextColor());
+	const COLORREF ink = dc->GetTextColor();
+	HPEN pen = CreatePen(PS_SOLID, 1, ink);
+	HBRUSH brush = CreateSolidBrush(ink);
 	dc->SelectObject(pen);
-
-	const int head = 4;
+	dc->SelectObject(brush);
 
 	if (climbing) {
-		dc->MoveTo(cx, bottom);
-		dc->LineTo(cx, top);
-		dc->MoveTo(cx - 3, top + head);
-		dc->LineTo(cx, top);
-		dc->LineTo(cx + 3, top + head);
+		dc->MoveTo(cx, baseline);
+		dc->LineTo(cx, capTop + headH);
+
+		POINT head[] = { { cx, capTop }, { cx - headW, capTop + headH }, { cx + headW, capTop + headH } };
+		dc->Polygon(head, 3);
 	}
 	else {
-		dc->MoveTo(cx, top);
-		dc->LineTo(cx, bottom);
-		dc->MoveTo(cx - 3, bottom - head);
-		dc->LineTo(cx, bottom);
-		dc->LineTo(cx + 3, bottom - head);
+		dc->MoveTo(cx, capTop);
+		dc->LineTo(cx, baseline - headH);
+
+		POINT head[] = { { cx, baseline }, { cx - headW, baseline - headH }, { cx + headW, baseline - headH } };
+		dc->Polygon(head, 3);
 	}
 
-	// Restore before deleting: DeleteObject fails silently on a pen still selected into
-	// the DC, and GDI handles are a process resource shared with every other plugin.
+	// Restore before deleting: DeleteObject fails silently on an object still selected
+	// into the DC, and GDI handles are a process resource shared with every other plugin
+	// loaded into EuroScope.
 	dc->RestoreDC(sDC);
 	DeleteObject(pen);
+	DeleteObject(brush);
 }
 
 void CACTag::DrawHistoryDots(CDC *dc, CRadarTarget *rt)
