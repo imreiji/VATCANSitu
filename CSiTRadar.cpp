@@ -2941,11 +2941,20 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 			EndCPDLCService(cs);
 		}
 		else if (func == "Flight Plan") {
+			// EuroScope's own flight plan dialog, which is what the radar context menu's
+			// "FltPlan" entry opens too.
+			//
+			// This used to construct a CAppWindows of type WINDOW_FLIGHT_PLAN. No
+			// constructor has a branch for that type, so it produced the default empty
+			// 200x200 box with no buttons in it, and no handler anywhere answered
+			// WINDOW_FLIGHT_PLAN - the constant appeared in exactly two places in the
+			// tree, its definition and that line. The result was a blank window with no
+			// way to close it.
 			CFlightPlan fp = GetPlugIn()->FlightPlanSelect(cs.c_str());
 			if (fp.IsValid()) {
-				CAppWindows fpWindow(Pt, WINDOW_FLIGHT_PLAN, fp, GetRadarArea());
-				fpWindow.m_callsign = cs;
-				menuState.radarScrWindows[fpWindow.m_windowId_] = fpWindow;
+				GetPlugIn()->SetASELAircraft(fp);
+				StartTagFunction(fp.GetCallsign(), NULL, TAG_ITEM_TYPE_PLANE_TYPE,
+					fp.GetCallsign(), NULL, TAG_ITEM_FUNCTION_OPEN_FP_DIALOG, Pt, Area);
 			}
 		}
 		else if (func == "PDC") {
@@ -4186,11 +4195,21 @@ void CSiTRadar::OnMoveScreenObject(int ObjectType, const char* sObjectId, POINT 
 			ClampListOffset(list, listArea);
 		}
 
-		if (ObjectType == WINDOW_TITLE_BAR) {
-			if (menuState.radarScrWindows.count(stoi(sObjectId)) != 0) {
-				menuState.radarScrWindows.at(stoi(sObjectId)).m_origin 
-					= { Area.left , Area.top};
-			}
+	}
+
+	// Outside the middle button check above, deliberately.
+	//
+	// Dragging a tag is a middle button gesture because that is what the real system
+	// does, and every branch above is a tag. A window with a title bar is not: nobody
+	// expects to hold the middle button to move a dialog, so left dragging one did
+	// nothing and the window looked stuck. That is worse for a window whose close button
+	// is missing or refuses, because moving it aside is the only thing left.
+	if (ObjectType == WINDOW_TITLE_BAR) {
+		const int windowId = atoi(sObjectId);
+		auto window = menuState.radarScrWindows.find(windowId);
+		if (window != menuState.radarScrWindows.end()) {
+			window->second.m_origin = { Area.left, Area.top };
+			RequestRefresh();
 		}
 	}
 }

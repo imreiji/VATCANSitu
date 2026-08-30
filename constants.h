@@ -159,6 +159,11 @@ const int HALO_TOOL_Y = 0;
 const int WINDOW_TITLE_BAR = 3000;
 
 
+// Nothing implements this. No CAppWindows constructor has a branch for it and no handler
+// answers it, so constructing a window of this type yields the default empty box with no
+// buttons and nothing that can close it. The flight plan button opens EuroScope's own
+// dialog through TAG_ITEM_FUNCTION_OPEN_FP_DIALOG instead. Kept only so the number is not
+// reused; give it a constructor branch and a close button before using it.
 const int WINDOW_FLIGHT_PLAN = 6000;
 const int WINDOW_CTRL_REMARKS = 6001;
 const int WINDOW_LIST_BOX_ELEMENT = 6002;
