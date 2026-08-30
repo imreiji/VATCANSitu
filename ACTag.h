@@ -4,6 +4,7 @@
 #include "CSiTRadar.h"
 #include "SituPlugin.h"
 #include "CFontHelper.h"
+#include "TagCallsign.h"
 
 using namespace std;
 
@@ -19,6 +20,17 @@ public:
     // Tags for Radar targets
     static void CACTag::DrawRTACTag(CDC* dc, CRadarScreen* rad, CRadarTarget* rt, CFlightPlan* fp, unordered_map<string, POINT>* tOffset);
     static void DrawNARDSTag(CDC* dc, CRadarScreen* rad, CRadarTarget* rt, CFlightPlan* fp, unordered_map<string, POINT>* tOffset);
+    // The vertical movement indicator, drawn rather than typed.
+    //
+    // It used to be DrawText of "^" or "|", which the EuroScope tag font renders as half
+    // triangles. Getting a real arrow out of that font would mean guessing which
+    // character maps to one, and a wrong guess renders as whatever else is at that code
+    // point with nothing to say it went wrong. Drawing the shape removes the guess.
+    //
+    // Occupies a fixed width slot and advances r.right past itself, so it drops into the
+    // same left-to-right chain the DrawText calls around it use.
+    static void DrawVMIArrow(CDC* dc, RECT& r, bool climbing);
+
     static void DrawHistoryDots(CDC* dc, CRadarTarget* rt);
     static void DrawHistoryDots(CDC* dc, CFlightPlan* rt);
 
