@@ -1061,15 +1061,21 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		// third line and the block reads squawk, callsign, altitude:
 		//
 		//     2000
-		//     CGNQC
+		//     CGNQC   <- level with the present position symbol
 		//     055
 		//
-		// Which pushes the squawk up a line. Everything else uncorrelated keeps the two
-		// line block it has always had, so a primary or a plain SSR return does not grow
-		// an empty row.
+		// The middle line is the one that sits level with the symbol, and on an ADS-B
+		// block that line is the callsign: the identity is the thing a controller looks
+		// at first, so it gets the position the eye goes to. The altitude moves down a
+		// line to make room rather than the squawk moving up, which keeps the top of the
+		// block in the same place whether the target is ADS-B or not.
+		//
+		// Everything else uncorrelated keeps the two line block it has always had, with
+		// the altitude level with the symbol, so a primary or a plain SSR return neither
+		// grows an empty row nor shifts.
 		const bool adsbIdentity = CSiTRadar::mAcData[rt->GetCallsign()].isADSB;
 
-		uline0.top = adsbIdentity ? (p.y - 31) : (p.y - 19);
+		uline0.top = p.y - 19;
 		uline0.left = p.x + 10;
 		if (CSiTRadar::halfSecTick && CSiTRadar::mAcData[rt->GetCallsign()].multipleDiscrete)
 		{
@@ -1082,7 +1088,7 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		if (adsbIdentity)
 		{
 			RECT ucs{};
-			ucs.top = p.y - 19;
+			ucs.top = p.y - 7;
 			ucs.left = p.x + 10;
 
 			// In full, never shortened. A correlated Canadian registration loses its
@@ -1094,7 +1100,7 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 			rad->AddScreenObject(TAG_ITEM_TYPE_CALLSIGN, rt->GetCallsign(), ucs, TRUE, rt->GetCallsign());
 		}
 
-		uline1.top = p.y - 7;
+		uline1.top = adsbIdentity ? (p.y + 5) : (p.y - 7);
 		uline1.left = p.x + 10;
 		dc->DrawText(altThreeDigit.c_str(), &uline1, DT_LEFT | DT_CALCRECT);
 		dc->DrawText(altThreeDigit.c_str(), &uline1, DT_LEFT);
