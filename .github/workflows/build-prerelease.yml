@@ -89,6 +89,8 @@ jobs:
         testbin\CpdlcUplinkTests.exe || exit /b 1
         cl /nologo /EHsc /W4 /std:c++17 tests\CpdlcErrorTests.cpp /Fe:testbin\CpdlcErrorTests.exe /Fo:testbin\ || exit /b 1
         testbin\CpdlcErrorTests.exe || exit /b 1
+        cl /nologo /EHsc /W4 /std:c++17 tests\TagCallsignTests.cpp /Fe:testbin\TagCallsignTests.exe /Fo:testbin\ || exit /b 1
+        testbin\TagCallsignTests.exe || exit /b 1
 
     - name: Build artifact from source
       run: msbuild "${env:GITHUB_WORKSPACE}\VATCANSitu.vcxproj"

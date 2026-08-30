@@ -2,6 +2,7 @@
 #include "CSiTRadar.h"
 #include "PositionString.h"
 #include "CpdlcUplinks.h"
+#include "TagCallsign.h"
 
 using namespace Gdiplus;
 
@@ -660,8 +661,26 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 					AddScreenObject(AIRCRAFT_SYMBOL, callSign.c_str(), prect, FALSE, "");
 
 					// display CJS
-					if ((radarTarget.GetPosition().GetRadarFlags() >= 2 && isCorrelated) || CSiTRadar::mAcData[radarTarget.GetCallsign()].isADSB) {
+					// Decided before the gate below, because an uncorrelated VFR target -
+					// a 1200 squawk with no flight plan behind it - does not pass that
+					// gate and is exactly the case that needs the marker. Empty string
+					// for the field because the CJS is initialised from the tracking id
+					// just below, so the two are empty together.
+					const bool vfMarker = SituTag::ShowsVfrJurisdiction(
+						CSiTRadar::mAcData[callSign].hasVFRFP,
+						radarTarget.GetPosition().GetSquawk(),
+						GetPlugIn()->FlightPlanSelect(callSign.c_str()).GetTrackingControllerId(),
+						"");
+
+					if ((radarTarget.GetPosition().GetRadarFlags() >= 2 && isCorrelated)
+						|| CSiTRadar::mAcData[radarTarget.GetCallsign()].isADSB
+						|| vfMarker) {
 						string CJS = GetPlugIn()->FlightPlanSelect(callSign.c_str()).GetTrackingControllerId();
+
+						// "VF" where a controller id would go: unowned and VFR is a state,
+						// not an absence. Only ever fills an empty slot and only when
+						// nobody is tracking, so a real position id is never replaced.
+						if (vfMarker) { CJS = "VF"; }
 
 						COLORREF cjsColor = C_PPS_YELLOW;
 
@@ -1124,8 +1143,19 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 					}
 
 					// show CJS for controller tracking aircraft // or if in handoff mode, show the target controller's CJS
-					if ((radarTarget.GetPosition().GetRadarFlags() >= 2 && isCorrelated)) { // || CSiTRadar::mAcData[radarTarget.GetCallsign()].isADSB) {
-						if (radarTarget.GetPosition().GetRadarFlags() == 4 && !isADSB) {}
+					// Decided before the gate below, because an uncorrelated VFR target -
+					// a 1200 squawk with no flight plan behind it - does not pass that
+					// gate and is exactly the case that needs the marker. Empty string
+					// for the field because the CJS is initialised from the tracking id
+					// just below, so the two are empty together.
+					const bool vfMarker = SituTag::ShowsVfrJurisdiction(
+						CSiTRadar::mAcData[callSign].hasVFRFP,
+						radarTarget.GetPosition().GetSquawk(),
+						GetPlugIn()->FlightPlanSelect(callSign.c_str()).GetTrackingControllerId(),
+						"");
+
+					if ((radarTarget.GetPosition().GetRadarFlags() >= 2 && isCorrelated) || vfMarker) {
+						if (radarTarget.GetPosition().GetRadarFlags() == 4 && !isADSB && !vfMarker) {}
 						else {
 
 							dc.SelectObject(CFontHelper::Euroscope14);
@@ -1138,6 +1168,11 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 							rectCJS.bottom = p.y;
 
 							string CJS = GetPlugIn()->FlightPlanSelect(callSign.c_str()).GetTrackingControllerId();
+
+							// "VF" where a controller id would go. Handoff mode below
+							// overwrites it deliberately: a coordinated next controller is
+							// a better answer than "unowned" when there is one.
+							if (vfMarker) { CJS = "VF"; }
 
 							if (menuState.handoffMode &&
 								strcmp(radarTarget.GetCallsign(), GetPlugIn()->FlightPlanSelectASEL().GetCallsign()) == 0) {

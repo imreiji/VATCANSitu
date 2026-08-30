@@ -188,7 +188,10 @@ void CACTag::DrawFPACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		{
 			wtSymbol = "-";
 		}
-		cs = cs + wtSymbol;
+		// Canadian registrations lose the nationality C on the tag - CGABC is drawn GABC.
+	// After the lookups above, never before: cs is a FlightPlanSelect key up there and
+	// a shortened key finds nothing. Hit testing keeps using fp->GetCallsign().
+	cs = SituTag::DisplayCallsign(cs) + wtSymbol;
 
 		fp->GetClearedAltitude();
 
@@ -282,7 +285,10 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		string(rad->GetPlugIn()->FlightPlanSelect(cs.c_str()).GetFlightPlanData().GetAircraftFPType()) == "B753") {
 		wtSymbol = "/";
 	}
-	cs = cs + wtSymbol;
+	// Canadian registrations lose the nationality C on the tag - CGABC is drawn GABC.
+	// After the lookups above, never before: cs is a FlightPlanSelect key up there and
+	// a shortened key finds nothing. Hit testing keeps using fp->GetCallsign().
+	cs = SituTag::DisplayCallsign(cs) + wtSymbol;
 
 	char commTypeChar = tolower(fp->GetControllerAssignedData().GetCommunicationType());
 	if (commTypeChar == '\0')
@@ -312,15 +318,6 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 	{
 		altThreeDigit.insert(altThreeDigit.begin(), 3 - altThreeDigit.size(), '0');
 	}
-	string vmi;
-	if (rt->GetVerticalSpeed() > 400)
-	{
-		vmi = "^";
-	}
-	if (rt->GetVerticalSpeed() < -400)
-	{
-		vmi = "|";
-	}; // up arrow "??!" = downarrow
 	string vmr = to_string(abs(rt->GetVerticalSpeed() / 200));
 	if (vmr.size() <= 2)
 	{
@@ -477,6 +474,11 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		// Line 0 - CPDLC mnemonic, above the callsign. Nothing else draws here on an alpha
 		// tag, so this displaces nothing. Blue for a downlink awaiting a controller,
 		// green for the last uplink sent.
+		RECT rline0;
+		rline0.top = line0.y;
+		rline0.left = line0.x;
+		rline0.bottom = line1.y;
+
 		if (CSiTRadar::mAcData[rt->GetCallsign()].cpdlcMnemonic
 			&& !CSiTRadar::mAcData[rt->GetCallsign()].CPDLCMessages.empty())
 		{
@@ -490,17 +492,35 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 				dc->SelectObject(CFontHelper::Euroscope14);
 				dc->SetTextColor(latest.isdlMessage ? C_CPDLC_BLUE : C_CPDLC_GREEN);
 
-				RECT rline0;
-				rline0.top = line0.y;
-				rline0.left = line0.x;
-				rline0.bottom = line1.y;
-
 				dc->DrawText(mnemonic.c_str(), &rline0, DT_LEFT | DT_CALCRECT);
 				dc->DrawText(mnemonic.c_str(), &rline0, DT_LEFT);
 				rad->AddScreenObject(TAG_CPDLC_MNEMONIC, rt->GetCallsign(), rline0, true, "CPDLC Mnemonic");
 
 				dc->RestoreDC(sDCMnemonic);
+
+				// Anything else on line 0 starts after the mnemonic rather than under it.
+				rline0.left = rline0.right + 5;
 			}
+		}
+
+		// The transponder code, when a correlated ADS-B target is not squawking what was
+		// assigned - or has nothing assigned. Correlation by broadcast identity does not
+		// involve the code, so it can be stale or simply wrong with nothing on the tag to
+		// show it. A conventional correlated target is squawking its assignment by virtue
+		// of how it got correlated, so it stays off the tag as before.
+		if (SituTag::ShowsSquawkOnTag(CSiTRadar::mAcData[rt->GetCallsign()].isADSB,
+			ssr, fp->GetControllerAssignedData().GetSquawk()))
+		{
+			int sDCSquawk = dc->SaveDC();
+
+			dc->SelectObject(CFontHelper::Euroscope14);
+			dc->SetTextColor(C_PPS_YELLOW);
+
+			dc->DrawText(ssr.c_str(), &rline0, DT_LEFT | DT_CALCRECT);
+			dc->DrawText(ssr.c_str(), &rline0, DT_LEFT);
+			rad->AddScreenObject(TAG_ITEM_TYPE_SQUAWK, rt->GetCallsign(), rline0, TRUE, "");
+
+			dc->RestoreDC(sDCSquawk);
 		}
 
 		// Line 1
@@ -613,8 +633,7 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		if (abs(rt->GetVerticalSpeed()) > 400)
 		{
 			rline2.left = rline2.right;
-			dc->DrawText(vmi.c_str(), &rline2, DT_LEFT | DT_CALCRECT);
-			dc->DrawText(vmi.c_str(), &rline2, DT_LEFT);
+			DrawVMIArrow(dc, rline2, rt->GetVerticalSpeed() > 0);
 
 			rline2.left = rline2.right;
 			dc->DrawText(vmr.c_str(), &rline2, DT_LEFT | DT_CALCRECT);
@@ -1030,8 +1049,7 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		if (abs(rt->GetVerticalSpeed()) > 400)
 		{
 			bline1.left = bline1.right;
-			dc->DrawText(vmi.c_str(), &bline1, DT_LEFT | DT_CALCRECT);
-			dc->DrawText(vmi.c_str(), &bline1, DT_LEFT);
+			DrawVMIArrow(dc, bline1, rt->GetVerticalSpeed() > 0);
 
 			bline1.left = bline1.right;
 			dc->DrawText(vmr.c_str(), &bline1, DT_LEFT | DT_CALCRECT);
@@ -1062,6 +1080,24 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		RECT uline2{};
 		RECT uline3{};
 
+		// An uncorrelated ADS-B target is broadcasting its own identity, so it gets a
+		// third line and the block reads squawk, callsign, altitude:
+		//
+		//     2000
+		//     CGNQC   <- level with the present position symbol
+		//     055
+		//
+		// The middle line is the one that sits level with the symbol, and on an ADS-B
+		// block that line is the callsign: the identity is the thing a controller looks
+		// at first, so it gets the position the eye goes to. The altitude moves down a
+		// line to make room rather than the squawk moving up, which keeps the top of the
+		// block in the same place whether the target is ADS-B or not.
+		//
+		// Everything else uncorrelated keeps the two line block it has always had, with
+		// the altitude level with the symbol, so a primary or a plain SSR return neither
+		// grows an empty row nor shifts.
+		const bool adsbIdentity = CSiTRadar::mAcData[rt->GetCallsign()].isADSB;
+
 		uline0.top = p.y - 19;
 		uline0.left = p.x + 10;
 		if (CSiTRadar::halfSecTick && CSiTRadar::mAcData[rt->GetCallsign()].multipleDiscrete)
@@ -1072,7 +1108,22 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		dc->DrawText(ssr.c_str(), &uline0, DT_LEFT);
 		rad->AddScreenObject(TAG_ITEM_TYPE_SQUAWK, rt->GetCallsign(), uline0, TRUE, "");
 
-		uline1.top = p.y - 7;
+		if (adsbIdentity)
+		{
+			RECT ucs{};
+			ucs.top = p.y - 7;
+			ucs.left = p.x + 10;
+
+			// In full, never shortened. A correlated Canadian registration loses its
+			// nationality C because a flight plan says who the aircraft is; here nothing
+			// does, so the tag shows exactly what is being broadcast and nothing else.
+			const std::string adsbCallsign = rt->GetCallsign();
+			dc->DrawText(adsbCallsign.c_str(), &ucs, DT_LEFT | DT_CALCRECT);
+			dc->DrawText(adsbCallsign.c_str(), &ucs, DT_LEFT);
+			rad->AddScreenObject(TAG_ITEM_TYPE_CALLSIGN, rt->GetCallsign(), ucs, TRUE, rt->GetCallsign());
+		}
+
+		uline1.top = adsbIdentity ? (p.y + 5) : (p.y - 7);
 		uline1.left = p.x + 10;
 		dc->DrawText(altThreeDigit.c_str(), &uline1, DT_LEFT | DT_CALCRECT);
 		dc->DrawText(altThreeDigit.c_str(), &uline1, DT_LEFT);
@@ -1081,8 +1132,7 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		if (abs(rt->GetVerticalSpeed()) > 400)
 		{
 			uline1.left = uline1.right;
-			dc->DrawText(vmi.c_str(), &uline1, DT_LEFT | DT_CALCRECT);
-			dc->DrawText(vmi.c_str(), &uline1, DT_LEFT);
+			DrawVMIArrow(dc, uline1, rt->GetVerticalSpeed() > 0);
 
 			uline1.left = uline1.right;
 			dc->DrawText(vmr.c_str(), &uline1, DT_LEFT | DT_CALCRECT);
@@ -1131,7 +1181,10 @@ void CACTag::DrawNARDSTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightP
 	{
 		wtSymbol = "-";
 	}
-	cs = cs + wtSymbol;
+	// Canadian registrations lose the nationality C on the tag - CGABC is drawn GABC.
+	// After the lookups above, never before: cs is a FlightPlanSelect key up there and
+	// a shortened key finds nothing. Hit testing keeps using fp->GetCallsign().
+	cs = SituTag::DisplayCallsign(cs) + wtSymbol;
 
 	char commTypeChar = tolower(fp->GetControllerAssignedData().GetCommunicationType());
 	if (commTypeChar == '\0')
@@ -1161,15 +1214,6 @@ void CACTag::DrawNARDSTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightP
 	{
 		altThreeDigit.insert(altThreeDigit.begin(), 3 - altThreeDigit.size(), '0');
 	}
-	string vmi;
-	if (rt->GetVerticalSpeed() > 400)
-	{
-		vmi = "^";
-	}
-	if (rt->GetVerticalSpeed() < -400)
-	{
-		vmi = "|";
-	}; // up arrow "??!" = downarrow
 
 	string groundSpeed = to_string((rt->GetPosition().GetReportedGS() + 5) / 10);
 
@@ -1434,8 +1478,7 @@ void CACTag::DrawNARDSTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightP
 		if (abs(rt->GetVerticalSpeed()) > 400)
 		{
 			rline2.left = rline2.right;
-			dc->DrawText(vmi.c_str(), &rline2, DT_LEFT | DT_CALCRECT);
-			dc->DrawText(vmi.c_str(), &rline2, DT_LEFT);
+			DrawVMIArrow(dc, rline2, rt->GetVerticalSpeed() > 0);
 		}
 		rline2.left = rline2.right + 8;
 
@@ -1578,6 +1621,76 @@ void CACTag::DrawFPConnector(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlig
 	// restore, then delete: DeleteObject fails on a still-selected object and leaks it
 	dc->RestoreDC(sDC);
 	DeleteObject(targetPen);
+}
+
+void CACTag::DrawVMIArrow(CDC* dc, RECT& r, bool climbing)
+{
+	// Sized and placed from the font's own metrics rather than from constants.
+	//
+	// The first version used fixed insets into the rect and a head made of two strokes.
+	// Both were wrong at this size. The rect a DrawText leaves behind is the full line
+	// box - ascent, descent and internal leading - so an arrow spanning it stands taller
+	// than the digits either side and sits high against them. And a stroked head on an
+	// eight pixel arrow is two hairlines meeting at a point, which reads as a kink in
+	// the shaft rather than as an arrowhead.
+	//
+	// So: span the digits, not the line box, and fill the head.
+	TEXTMETRIC tm{};
+	dc->GetTextMetrics(&tm);
+
+	// Where the digits actually sit. Internal leading is the blank band above the caps,
+	// and the baseline is ascent below the top - between them is the glyph.
+	const int capTop = r.top + tm.tmInternalLeading;
+	const int baseline = r.top + tm.tmAscent;
+	const int height = baseline - capTop;
+
+	// One character wide, so the arrow occupies the same column a digit would and the
+	// vertical rate after it keeps its spacing.
+	const int width = (tm.tmAveCharWidth > 0) ? tm.tmAveCharWidth : 7;
+	r.right = r.left + width;
+
+	if (height < 4) { return; }
+
+	const int cx = r.left + (width / 2);
+
+	// A third of the arrow is head. Half its height either side gives a point of about
+	// ninety degrees, which stays legible when the whole thing is eight pixels tall.
+	int headH = height / 3;
+	if (headH < 3) { headH = 3; }
+	int headW = headH / 2 + 1;
+	if (headW > (width / 2)) { headW = width / 2; }
+
+	int sDC = dc->SaveDC();
+
+	// Same colour as the text around it, whatever the caller last set - white while a
+	// tag is blinking, yellow otherwise.
+	const COLORREF ink = dc->GetTextColor();
+	HPEN pen = CreatePen(PS_SOLID, 1, ink);
+	HBRUSH brush = CreateSolidBrush(ink);
+	dc->SelectObject(pen);
+	dc->SelectObject(brush);
+
+	if (climbing) {
+		dc->MoveTo(cx, baseline);
+		dc->LineTo(cx, capTop + headH);
+
+		POINT head[] = { { cx, capTop }, { cx - headW, capTop + headH }, { cx + headW, capTop + headH } };
+		dc->Polygon(head, 3);
+	}
+	else {
+		dc->MoveTo(cx, capTop);
+		dc->LineTo(cx, baseline - headH);
+
+		POINT head[] = { { cx, baseline }, { cx - headW, baseline - headH }, { cx + headW, baseline - headH } };
+		dc->Polygon(head, 3);
+	}
+
+	// Restore before deleting: DeleteObject fails silently on an object still selected
+	// into the DC, and GDI handles are a process resource shared with every other plugin
+	// loaded into EuroScope.
+	dc->RestoreDC(sDC);
+	DeleteObject(pen);
+	DeleteObject(brush);
 }
 
 void CACTag::DrawHistoryDots(CDC *dc, CRadarTarget *rt)
