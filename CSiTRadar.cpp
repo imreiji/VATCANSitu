@@ -2,6 +2,7 @@
 #include "CSiTRadar.h"
 #include "PositionString.h"
 #include "CpdlcUplinks.h"
+#include "TagCallsign.h"
 
 using namespace Gdiplus;
 
@@ -663,6 +664,20 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 					if ((radarTarget.GetPosition().GetRadarFlags() >= 2 && isCorrelated) || CSiTRadar::mAcData[radarTarget.GetCallsign()].isADSB) {
 						string CJS = GetPlugIn()->FlightPlanSelect(callSign.c_str()).GetTrackingControllerId();
 
+						// A VFR aircraft nobody is tracking has no controller id to show
+						// here, so the slot sat empty. "VF" goes there instead: unowned
+						// and VFR is a state, not an absence. Only ever fills an empty
+						// slot and only when nobody is tracking, so a real position id is
+						// never replaced. See ShowsVfrJurisdiction.
+						if (SituTag::ShowsVfrJurisdiction(
+							CSiTRadar::mAcData[callSign].hasVFRFP,
+							radarTarget.GetPosition().GetSquawk(),
+							GetPlugIn()->FlightPlanSelect(callSign.c_str()).GetTrackingControllerId(),
+							CJS))
+						{
+							CJS = "VF";
+						}
+
 						COLORREF cjsColor = C_PPS_YELLOW;
 
 						dc.SelectObject(CFontHelper::Euroscope14);
@@ -1138,6 +1153,20 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 							rectCJS.bottom = p.y;
 
 							string CJS = GetPlugIn()->FlightPlanSelect(callSign.c_str()).GetTrackingControllerId();
+
+							// A VFR aircraft nobody is tracking has no controller id to show
+							// here, so the slot sat empty. "VF" goes there instead: unowned
+							// and VFR is a state, not an absence. Only ever fills an empty
+							// slot and only when nobody is tracking, so a real position id is
+							// never replaced. See ShowsVfrJurisdiction.
+							if (SituTag::ShowsVfrJurisdiction(
+								CSiTRadar::mAcData[callSign].hasVFRFP,
+								radarTarget.GetPosition().GetSquawk(),
+								GetPlugIn()->FlightPlanSelect(callSign.c_str()).GetTrackingControllerId(),
+								CJS))
+							{
+								CJS = "VF";
+							}
 
 							if (menuState.handoffMode &&
 								strcmp(radarTarget.GetCallsign(), GetPlugIn()->FlightPlanSelectASEL().GetCallsign()) == 0) {

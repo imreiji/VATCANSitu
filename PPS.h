@@ -131,6 +131,21 @@ public:
 		case 4: {
 			
 			if(!isADSB) { break; } 
+
+			// An uncorrelated aircraft on 1200 is a VFR conspicuity return, and that is
+			// what the symbol has to say - the ADS-B square would claim an identity
+			// nothing has established. radFlag 2 and 3 already do this; ADS-B did not,
+			// so an ADS-B equipped VFR aircraft squawking 1200 drew as a datalinked
+			// target instead of as an unknown VFR one.
+			if (!strcmp(squawk.c_str(), "1200") && !isCorrelated) {
+
+				dc->SelectStockObject(NULL_BRUSH);
+
+				POINT vertices[] = { { p.x - 4, p.y + 4 } , { p.x, p.y - 4 } , { p.x + 4,p.y + 4 } }; // Yellow Triangle
+				dc->Polygon(vertices, 3);
+
+				break;
+			}
 			
 			else {
 
@@ -184,6 +199,18 @@ public:
 		case 6:
 		case 7: {
 			// Code for radFlag equals 4 = MODE C = ADSB
+
+			// Same rule as case 4 above: 1200 and uncorrelated is a VFR conspicuity
+			// return whatever the equipment says.
+			if (isADSB && !strcmp(squawk.c_str(), "1200") && !isCorrelated) {
+
+				dc->SelectStockObject(NULL_BRUSH);
+
+				POINT vertices[] = { { p.x - 4, p.y + 4 } , { p.x, p.y - 4 } , { p.x + 4,p.y + 4 } }; // Yellow Triangle
+				dc->Polygon(vertices, 3);
+
+				break;
+			}
 
 			if (isADSB) {
 				dc->MoveTo(p.x - 4, p.y - 4);
