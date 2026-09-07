@@ -2,7 +2,9 @@
 #include "wxRadar.h"
 #include "SituLog.h"
 
+#include <algorithm>
 #include <chrono>
+#include <utility>
 
 cell wxRadar::wxReturn[256][256];
 string wxRadar::wxLatCtr = { "0.0" };
@@ -402,6 +404,8 @@ void wxRadar::parseVatsimATIS(int i) {
 
 
     int pilots = 0;
+    int adsb = 0;
+    int rvsm = 0;
     int atisAirports = 0;
 
     try {
@@ -431,8 +435,12 @@ void wxRadar::parseVatsimATIS(int i) {
                 }
             }
 
-            // Counted before the swap: newADSB is moved from by it.
+            // Counted before the swap: newADSB and newRVSM are moved from by it.
             pilots = static_cast<int>(newADSB.size());
+            adsb = static_cast<int>(std::count_if(newADSB.begin(), newADSB.end(),
+                [](const std::pair<const string, bool>& e) { return e.second; }));
+            rvsm = static_cast<int>(std::count_if(newRVSM.begin(), newRVSM.end(),
+                [](const std::pair<const string, bool>& e) { return e.second; }));
 
             std::unique_lock<shared_mutex> capabilityLock(CSiTRadar::acCapabilityMutex);
             CSiTRadar::acADSB.swap(newADSB);
@@ -461,7 +469,7 @@ void wxRadar::parseVatsimATIS(int i) {
     }
 
     SituLog::Line("NET", "vatsim-feed", SituLog::Fields().Add("ok", true)
-        .Add("pilots", pilots).Add("ms", elapsedMs()));
+        .Add("pilots", pilots).Add("adsb", adsb).Add("rvsm", rvsm).Add("ms", elapsedMs()));
     SituLog::Line("NET", "atis", SituLog::Fields().Add("ok", true)
         .Add("airports", atisAirports));
 
