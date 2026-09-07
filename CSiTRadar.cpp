@@ -118,7 +118,10 @@ void CSiTRadar::StartCPDLCPoll()
 		SituLog::Line("NET", "cpdlc-poll", SituLog::Fields()
 			.Add("ok", result.severity == SituCpdlcErrors::Ok)
 			.Add("messages", static_cast<int>(result.messages.size()))
-			.Add("error", result.error)
+			// result.error is the raw Hoppie reply, so it is whatever answered - including
+			// a proxy's HTML error page. Capped so one bad reply cannot produce a
+			// multi-kilobyte line; 200 still identifies the page.
+			.Add("error", SituLog::Truncate(result.error, 200))
 			.Add("ms", static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
 				std::chrono::steady_clock::now() - t0).count())));
 

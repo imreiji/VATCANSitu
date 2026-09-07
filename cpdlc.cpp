@@ -276,8 +276,12 @@ void CPDLCMessage::SendCPDLCMessage() {
 	// delivered.
 	this->sent = post.ok && post.body.compare(0, 2, "ok") == 0;
 
-	// The body carries Hoppie's own refusal when the transport itself worked.
-	const std::string error = post.ok ? (this->sent ? std::string() : post.body) : post.error;
+	// The body carries Hoppie's own refusal when the transport itself worked. Capped: a
+	// proxy or captive portal answers with an HTML page, and that must not become a
+	// multi-kilobyte single line in the log. 200 leaves an error page identifiable.
+	const std::string error = post.ok
+		? (this->sent ? std::string() : SituLog::Truncate(post.body, 200))
+		: post.error;
 
 	SituLog::Line("NET", "cpdlc-send", SituLog::Fields()
 		.Add("to", this->receipient)
