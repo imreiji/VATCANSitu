@@ -181,10 +181,12 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             if (wParam == VK_RETURN) {
                 if (parentWin->m_winType == WINDOW_HANDOFF_EXT_CJS) {
 
+                    const string toCallsign =
+                        CSiTRadar::m_pRadScr->GetPlugIn()->ControllerSelectByPositionId(focusedField->m_text.c_str()).GetCallsign();
                     CSiTRadar::m_pRadScr->GetPlugIn()->FlightPlanSelect(parentWin->m_callsign.c_str()).InitiateHandoff(
-                        CSiTRadar::m_pRadScr->GetPlugIn()->ControllerSelectByPositionId(focusedField->m_text.c_str()).GetCallsign()
+                        toCallsign.c_str()
                     );
-                    SituLog::Line("ES>", "HANDOFF", SituLog::Fields().Add("callsign", parentWin->m_callsign).Add("to", focusedField->m_text).Add("via", "typed"));
+                    SituLog::Line("ES>", "HANDOFF", SituLog::Fields().Add("callsign", parentWin->m_callsign).Add("to", focusedField->m_text).Add("to_cs", toCallsign).Add("via", "typed"));
                     // Closing the window destroys parentWin and focusedField - nothing
                     // below may touch them.
                     CSiTRadar::CloseWindow(parentWin->m_windowId_);

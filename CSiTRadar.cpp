@@ -3492,9 +3492,11 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 
 	if (ObjectType == BUTTON_MENU_RMB_MENU) {
 		if (!strcmp(sObjectId, "AutoHandoff")) {
-			GetPlugIn()->FlightPlanSelectASEL().InitiateHandoff(GetPlugIn()->FlightPlanSelectASEL().GetCoordinatedNextController());
 			CFlightPlan handedOff = GetPlugIn()->FlightPlanSelectASEL();
-			SituLog::Line("ES>", "HANDOFF", SituLog::Fields().Add("callsign", handedOff.GetCallsign()).Add("to", handedOff.GetCoordinatedNextController()).Add("via", "auto"));
+			const std::string toCallsign = handedOff.GetCoordinatedNextController();
+			const std::string toId = GetPlugIn()->ControllerSelect(toCallsign.c_str()).GetPositionId();
+			handedOff.InitiateHandoff(toCallsign.c_str());
+			SituLog::Line("ES>", "HANDOFF", SituLog::Fields().Add("callsign", handedOff.GetCallsign()).Add("to", toId).Add("to_cs", toCallsign).Add("via", "auto"));
 			menuState.MB3menu = false;
 		}
 		if (!strcmp(sObjectId, "FltPlan")) {
@@ -3658,8 +3660,9 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 				return;
 			}
 
-			GetPlugIn()->FlightPlanSelectASEL().InitiateHandoff(GetPlugIn()->ControllerSelectByPositionId(sObjectId).GetCallsign());
-			SituLog::Line("ES>", "HANDOFF", SituLog::Fields().Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign()).Add("to", sObjectId).Add("via", "menu"));
+			const std::string toCallsign = GetPlugIn()->ControllerSelectByPositionId(sObjectId).GetCallsign();
+			GetPlugIn()->FlightPlanSelectASEL().InitiateHandoff(toCallsign.c_str());
+			SituLog::Line("ES>", "HANDOFF", SituLog::Fields().Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign()).Add("to", sObjectId).Add("to_cs", toCallsign).Add("via", "menu"));
 		}
 		if (!strcmp(menuState.MB3SecondaryMenuType.c_str(), "ModSFI")) {
 			ModifySFI(sObjectId, GetPlugIn()->FlightPlanSelectASEL());
