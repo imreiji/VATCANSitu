@@ -84,6 +84,135 @@ namespace
 		default:            return "?";
 		}
 	}
+
+	// The screen object type as its constant name, so a click line reads without a trip to
+	// constants.h. Every id that reaches AddScreenObject is here: the plugin's own ids from
+	// constants.h plus the EuroScope tag item types the tags register themselves under.
+	// nullptr for anything else - the call site prints the number instead. Menus register
+	// some decorative buttons under type 0, which has no name and lands there.
+	const char* ScreenObjectName(int type)
+	{
+		switch (type)
+		{
+		// EuroScope's own types, used at AddScreenObject sites in ACTag.cpp.
+		case TAG_ITEM_TYPE_SQUAWK:                  return "TAG_ITEM_TYPE_SQUAWK";
+		case TAG_ITEM_TYPE_ALTITUDE:                return "TAG_ITEM_TYPE_ALTITUDE";
+		case CTR_DATA_TYPE_SCRATCH_PAD_STRING:      return "CTR_DATA_TYPE_SCRATCH_PAD_STRING";
+		case TAG_ITEM_TYPE_CALLSIGN:                return "TAG_ITEM_TYPE_CALLSIGN";
+		case TAG_ITEM_TYPE_COMMUNICATION_TYPE:      return "TAG_ITEM_TYPE_COMMUNICATION_TYPE";
+		case TAG_ITEM_TYPE_GROUND_SPEED_WITH_N:     return "TAG_ITEM_TYPE_GROUND_SPEED_WITH_N";
+		case TAG_ITEM_TYPE_PLANE_TYPE:              return "TAG_ITEM_TYPE_PLANE_TYPE";
+		case TAG_ITEM_TYPE_DESTINATION:             return "TAG_ITEM_TYPE_DESTINATION";
+		case TAG_ITEM_TYPE_ASSIGNED_HEADING:        return "TAG_ITEM_TYPE_ASSIGNED_HEADING";
+
+		// Targets and tags.
+		case TAG_ITEM_PLANE_HALO:                   return "TAG_ITEM_PLANE_HALO";
+		case AIRCRAFT_SYMBOL:                       return "AIRCRAFT_SYMBOL";
+		case AIRCRAFT_CJS:                          return "AIRCRAFT_CJS";
+		case TAG_ITEM_FP_CS:                        return "TAG_ITEM_FP_CS";
+		case TAG_ITEM_FP_FINAL_ALTITUDE:            return "TAG_ITEM_FP_FINAL_ALTITUDE";
+		case TAG_ALT:                               return "TAG_ALT";
+		case TAG_CPDLC:                             return "TAG_CPDLC";
+		case TAG_CPDLC_MNEMONIC:                    return "TAG_CPDLC_MNEMONIC";
+		case TAG_ITEM_CPDLC:                        return "TAG_ITEM_CPDLC";
+
+		// Top menu buttons.
+		case BUTTON_MENU:                           return "BUTTON_MENU";
+		case BUTTON_MENU_HALO_OPTIONS:              return "BUTTON_MENU_HALO_OPTIONS";
+		case BUTTON_MENU_ALT_FILT_OPT:              return "BUTTON_MENU_ALT_FILT_OPT";
+		case BUTTON_MENU_ALT_FILT_ON:               return "BUTTON_MENU_ALT_FILT_ON";
+		case BUTTON_MENU_ALT_FILT_SAVE:             return "BUTTON_MENU_ALT_FILT_SAVE";
+		case BUTTON_MENU_PTL_TOOL:                  return "BUTTON_MENU_PTL_TOOL";
+		case BUTTON_MENU_RELOCATE:                  return "BUTTON_MENU_RELOCATE";
+		case BUTTON_MENU_EXTRAP_FP:                 return "BUTTON_MENU_EXTRAP_FP";
+		case BUTTON_MENU_OVRD_ALL:                  return "BUTTON_MENU_OVRD_ALL";
+		case BUTTON_MENU_QUICK_LOOK:                return "BUTTON_MENU_QUICK_LOOK";
+		case BUTTON_MENU_EXT_ALT:                   return "BUTTON_MENU_EXT_ALT";
+		case BUTTON_MENU_PTL_CLOSE:                 return "BUTTON_MENU_PTL_CLOSE";
+		case BUTTON_MENU_PTL_CLEAR_ALL:             return "BUTTON_MENU_PTL_CLEAR_ALL";
+		case BUTTON_MENU_PTL_ALL_ON:                return "BUTTON_MENU_PTL_ALL_ON";
+		case BUTTON_MENU_PTL_OPTIONS:               return "BUTTON_MENU_PTL_OPTIONS";
+		case BUTTON_MENU_HALO_CLOSE:                return "BUTTON_MENU_HALO_CLOSE";
+		case BUTTON_MENU_HALO_CLEAR_ALL:            return "BUTTON_MENU_HALO_CLEAR_ALL";
+		case BUTTON_MENU_HALO_MOUSE:                return "BUTTON_MENU_HALO_MOUSE";
+		case BUTTON_MENU_HALO_TOOL:                 return "BUTTON_MENU_HALO_TOOL";
+		case BUTTON_MENU_WX_HIGH:                   return "BUTTON_MENU_WX_HIGH";
+		case BUTTON_MENU_WX_ALL:                    return "BUTTON_MENU_WX_ALL";
+		case BUTON_MENU_DEST_APRT:                  return "BUTON_MENU_DEST_APRT";
+		case BUTTON_MENU_CLOSE_DEST:                return "BUTTON_MENU_CLOSE_DEST";
+		case BUTTON_MENU_CLEAR_DEST:                return "BUTTON_MENU_CLEAR_DEST";
+		case BUTTON_MENU_DEST_1:                    return "BUTTON_MENU_DEST_1";
+		case BUTTON_MENU_DEST_2:                    return "BUTTON_MENU_DEST_2";
+		case BUTTON_MENU_DEST_3:                    return "BUTTON_MENU_DEST_3";
+		case BUTTON_MENU_DEST_4:                    return "BUTTON_MENU_DEST_4";
+		case BUTTON_MENU_DEST_5:                    return "BUTTON_MENU_DEST_5";
+		case BUTTON_MENU_DEST_ICAO:                 return "BUTTON_MENU_DEST_ICAO";
+		case BUTTON_MENU_DEST_DIST:                 return "BUTTON_MENU_DEST_DIST";
+		case BUTTON_MENU_DEST_EST:                  return "BUTTON_MENU_DEST_EST";
+		case BUTTON_MENU_DEST_VFR:                  return "BUTTON_MENU_DEST_VFR";
+		case BUTTON_MENU_QL_CJS:                    return "BUTTON_MENU_QL_CJS";
+		case BUTTON_MENU_PTL_WB:                    return "BUTTON_MENU_PTL_WB";
+		case BUTTON_MENU_PTL_EB:                    return "BUTTON_MENU_PTL_EB";
+		case BUTTON_MENU_RMB_MENU:                  return "BUTTON_MENU_RMB_MENU";
+		case BUTTON_MENU_RMB_MENU_SECONDARY:        return "BUTTON_MENU_RMB_MENU_SECONDARY";
+		case BUTTON_MENU_CPDLC_OPTION:              return "BUTTON_MENU_CPDLC_OPTION";
+		case BUTTON_MENU_TBS_HDG:                   return "BUTTON_MENU_TBS_HDG";
+		case BUTTON_MENU_TBS_MIXED:                 return "BUTTON_MENU_TBS_MIXED";
+		case BUTTON_MENU_CRDA:                      return "BUTTON_MENU_CRDA";
+		case BUTTON_MENU_CRDA_CLOSE:                return "BUTTON_MENU_CRDA_CLOSE";
+		case BUTTON_MENU_SETUP:                     return "BUTTON_MENU_SETUP";
+
+		// Menu functions.
+		case FUNCTION_ALT_FILT_LOW:                 return "FUNCTION_ALT_FILT_LOW";
+		case FUNCTION_ALT_FILT_HIGH:                return "FUNCTION_ALT_FILT_HIGH";
+		case FUNCTION_ALT_FILT_SAVE:                return "FUNCTION_ALT_FILT_SAVE";
+		case FUNCTION_DEST_ICAO_1:                  return "FUNCTION_DEST_ICAO_1";
+		case FUNCTION_DEST_ICAO_2:                  return "FUNCTION_DEST_ICAO_2";
+		case FUNCTION_DEST_ICAO_3:                  return "FUNCTION_DEST_ICAO_3";
+		case FUNCTION_DEST_ICAO_4:                  return "FUNCTION_DEST_ICAO_4";
+		case FUNCTION_DEST_ICAO_5:                  return "FUNCTION_DEST_ICAO_5";
+		case FUNCTION_RMB_POPUP:                    return "FUNCTION_RMB_POPUP";
+		case FUNCTION_TBS_HDG:                      return "FUNCTION_TBS_HDG";
+		case TBS_FOLLOWER_TOGGLE:                   return "TBS_FOLLOWER_TOGGLE";
+		case BUTTON_MENU_CPDLC:                     return "BUTTON_MENU_CPDLC";
+		case FUNCTION_CPDLC_ICAO:                   return "FUNCTION_CPDLC_ICAO";
+
+		// Background and free text.
+		case SCREEN_BACKGROUND:                     return "SCREEN_BACKGROUND";
+		case FREE_TEXT:                             return "FREE_TEXT";
+
+		// Windows.
+		case WINDOW_TITLE_BAR:                      return "WINDOW_TITLE_BAR";
+		case WINDOW_FLIGHT_PLAN:                    return "WINDOW_FLIGHT_PLAN";
+		case WINDOW_CTRL_REMARKS:                   return "WINDOW_CTRL_REMARKS";
+		case WINDOW_LIST_BOX_ELEMENT:               return "WINDOW_LIST_BOX_ELEMENT";
+		case WINDOW_TEXT_FIELD:                     return "WINDOW_TEXT_FIELD";
+		case WINDOW_HANDOFF_EXT_CJS:                return "WINDOW_HANDOFF_EXT_CJS";
+		case WINDOW_POINT_OUT:                      return "WINDOW_POINT_OUT";
+		case HIGHLIGHT_POINT_OUT_ACCEPT:            return "HIGHLIGHT_POINT_OUT_ACCEPT";
+		case WINDOW_DIRECT_TO:                      return "WINDOW_DIRECT_TO";
+		case WINDOW_SCROLL_ARROW_UP:                return "WINDOW_SCROLL_ARROW_UP";
+		case WINDOW_SCROLL_ARROW_DOWN:              return "WINDOW_SCROLL_ARROW_DOWN";
+		case WINDOW_FREE_TEXT:                      return "WINDOW_FREE_TEXT";
+		case WINDOW_CPDLC:                          return "WINDOW_CPDLC";
+		case WINDOW_CPDLC_EDITOR:                   return "WINDOW_CPDLC_EDITOR";
+
+		// Lists.
+		case LIST_OFF_SCREEN:                       return "LIST_OFF_SCREEN";
+		case LIST_TIME_ATIS:                        return "LIST_TIME_ATIS";
+		case LIST_MESSAGES:                         return "LIST_MESSAGES";
+		case LIST_ITEM_SIMPLE_STRING:               return "LIST_ITEM_SIMPLE_STRING";
+
+		default:                                    return nullptr;
+		}
+	}
+
+	// "type" for a log line: the constant name where there is one, else the raw number.
+	std::string ScreenObjectField(int type)
+	{
+		const char* name = ScreenObjectName(type);
+		return name != nullptr ? std::string(name) : std::to_string(type);
+	}
 }
 
 void CSiTRadar::StartCPDLCPoll()
@@ -3083,7 +3212,7 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 	int Button)
 {
 	SituLog::Line("EVT", "CLICK", SituLog::Fields()
-		.Add("type", ObjectType).Add("id", sObjectId).Add("button", ButtonName(Button)));
+		.Add("type", ScreenObjectField(ObjectType)).Add("id", sObjectId).Add("button", ButtonName(Button)));
 
 	menuState.bgM3Click = false;
 
@@ -3572,7 +3701,7 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 	int Button)
 {
 	SituLog::Line("EVT", "BTN-DOWN", SituLog::Fields()
-		.Add("type", ObjectType).Add("id", sObjectId).Add("button", ButtonName(Button)));
+		.Add("type", ScreenObjectField(ObjectType)).Add("id", sObjectId).Add("button", ButtonName(Button)));
 
 	if (menuState.mouseMMB) { return; }
 
@@ -4338,7 +4467,7 @@ void CSiTRadar::OnMoveScreenObject(int ObjectType, const char* sObjectId, POINT 
 
 	// Only the drop, not every pixel of the drag.
 	if (Released) {
-		SituLog::Line("EVT", "MOVE", SituLog::Fields().Add("type", ObjectType).Add("id", sObjectId));
+		SituLog::Line("EVT", "MOVE", SituLog::Fields().Add("type", ScreenObjectField(ObjectType)).Add("id", sObjectId));
 	}
 
 	// Handling moving of the tags rendered by the plugin
@@ -4477,7 +4606,8 @@ void CSiTRadar::OnFunctionCall(int FunctionId,
 
 	SituLog::Line("EVT", "TAG-FUNC", SituLog::Fields()
 		.Add("id", FunctionId).Add("item", sItemString)
-		.Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign()));
+		.Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign())
+		.Add("where", "screen"));
 
 	if (FunctionId == FUNCTION_ALT_FILT_LOW) {
 		try {
@@ -5195,7 +5325,7 @@ void CSiTRadar::DrawACList(POINT p, CDC* dc, unordered_map<string, ACData>& ac, 
 
 void CSiTRadar::OnDoubleClickScreenObject(int ObjectType, const char* sObjectId, POINT Pt, RECT Area, int Button)
 {
-	SituLog::Line("EVT", "DBLCLICK", SituLog::Fields().Add("type", ObjectType).Add("id", sObjectId));
+	SituLog::Line("EVT", "DBLCLICK", SituLog::Fields().Add("type", ScreenObjectField(ObjectType)).Add("id", sObjectId));
 }
 
 void CSiTRadar::OnAsrContentToBeSaved() {

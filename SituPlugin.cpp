@@ -734,7 +734,8 @@ inline void SituPlugin::OnFunctionCall(int FunctionId, const char* sItemString, 
     string spString = fp.GetControllerAssignedData().GetScratchPadString();
 
     SituLog::Line("EVT", "TAG-FUNC", SituLog::Fields()
-        .Add("id", FunctionId).Add("item", sItemString).Add("callsign", fp.IsValid() ? fp.GetCallsign() : ""));
+        .Add("id", FunctionId).Add("item", sItemString).Add("callsign", fp.IsValid() ? fp.GetCallsign() : "")
+        .Add("where", "plugin"));
 
     if (FunctionId == TAG_FUNCTION_OPEN_CPDLC_WINDOW) {
 
@@ -854,7 +855,8 @@ void SituPlugin::OnCompilePrivateChat(const char* sSenderCallsign,
 
 bool SituPlugin::OnCompileCommand(const char* sCommandLine)
 {
-    const SituLog::LogCommand command = SituLog::ParseLogCommand(sCommandLine != nullptr ? sCommandLine : "");
+    const std::string commandText = sCommandLine != nullptr ? sCommandLine : "";
+    const SituLog::LogCommand command = SituLog::ParseLogCommand(commandText);
     if (command.action == SituLog::LogAction::NotOurs) { return false; }
 
     auto say = [this](const std::string& text) {
@@ -862,7 +864,12 @@ bool SituPlugin::OnCompileCommand(const char* sCommandLine)
     };
 
     // Record the command itself when the log is open. For "on" the open line covers it.
-    SituLog::Line("CMD", "log", SituLog::Fields().Add("args", std::string(sCommandLine != nullptr ? sCommandLine : "")));
+    // The follow branches below re-emit this after an implied Enable, so that a cold-start
+    // ".situ log <CALLSIGN>" leaves a record of what was followed in the file it opened.
+    auto logCommand = [&commandText]() {
+        SituLog::Line("CMD", "log", SituLog::Fields().Add("args", commandText));
+    };
+    logCommand();
 
     switch (command.action)
     {
@@ -886,6 +893,7 @@ bool SituPlugin::OnCompileCommand(const char* sCommandLine)
             const SituLog::EnableResult r = SituLog::Enable(wxRadar::getSituWxDir());
             if (!r.ok) { say("Log NOT started: " + r.error); break; }
             say("Logging to " + r.path);
+            logCommand();
         }
         SituLog::Follow(command.arg);
         say("Following " + command.arg + ".");
@@ -898,6 +906,7 @@ bool SituPlugin::OnCompileCommand(const char* sCommandLine)
             const SituLog::EnableResult r = SituLog::Enable(wxRadar::getSituWxDir());
             if (!r.ok) { say("Log NOT started: " + r.error); break; }
             say("Logging to " + r.path);
+            logCommand();
         }
         SituLog::Follow("ALL");
         say("Following all aircraft - this is heavy; use .situ log none to stop.");
