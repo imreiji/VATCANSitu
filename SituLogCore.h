@@ -175,8 +175,10 @@ namespace SituLog
         return command;
     }
 
-    inline const char* const kLogPrefix = "SituDebug-";
-    inline const char* const kLogSuffix = ".log";
+    // constexpr, not inline: the plugin project compiles as C++14, where inline variables do
+    // not exist. Both are used only inside this header, so per-TU copies cost nothing.
+    constexpr const char* const kLogPrefix = "SituDebug-";
+    constexpr const char* const kLogSuffix = ".log";
 
     inline bool IsLogFileName(const std::string& name)
     {
