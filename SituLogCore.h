@@ -109,4 +109,61 @@ namespace SituLog
         }
         return line;
     }
+
+    enum class LogAction { NotOurs, Help, On, Off, Follow, FollowAll, Unfollow, Status };
+
+    struct LogCommand
+    {
+        LogAction action = LogAction::NotOurs;
+        std::string arg;
+    };
+
+    inline std::string ToUpper(std::string s)
+    {
+        for (char& c : s) { if (c >= 'a' && c <= 'z') { c = static_cast<char>(c - 'a' + 'A'); } }
+        return s;
+    }
+
+    inline std::vector<std::string> SplitWords(const std::string& text)
+    {
+        std::vector<std::string> words;
+        std::string current;
+        for (char c : text)
+        {
+            if (c == ' ' || c == '\t')
+            {
+                if (!current.empty()) { words.push_back(current); current.clear(); }
+            }
+            else { current += c; }
+        }
+        if (!current.empty()) { words.push_back(current); }
+        return words;
+    }
+
+    // ".situ log <word>" -> an action. Exactly one word is accepted after the prefix; more
+    // is a typo and gets the help text rather than a guess.
+    inline LogCommand ParseLogCommand(const std::string& commandLine)
+    {
+        LogCommand command;
+
+        const std::vector<std::string> words = SplitWords(commandLine);
+        if (words.size() < 2) { return command; }
+        if (ToUpper(words[0]) != ".SITU" || ToUpper(words[1]) != "LOG") { return command; }
+
+        if (words.size() == 2) { command.action = LogAction::Help; return command; }
+        if (words.size() > 3) { command.action = LogAction::Help; return command; }
+
+        const std::string word = ToUpper(words[2]);
+        if (word == "ON")          { command.action = LogAction::On; }
+        else if (word == "OFF")    { command.action = LogAction::Off; }
+        else if (word == "ALL")    { command.action = LogAction::FollowAll; }
+        else if (word == "NONE")   { command.action = LogAction::Unfollow; }
+        else if (word == "STATUS") { command.action = LogAction::Status; }
+        else
+        {
+            command.action = LogAction::Follow;
+            command.arg = word;
+        }
+        return command;
+    }
 }

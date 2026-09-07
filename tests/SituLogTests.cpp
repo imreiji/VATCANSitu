@@ -76,6 +76,41 @@ int main()
         CheckEqual(Truncate("short", 60), "short", "short untouched");
     }
 
+    // --- Command parser. Anything not beginning ".situ log" is not ours and must not be
+    //     claimed, or the plugin would swallow other plugins' commands and chat.
+    {
+        Check(ParseLogCommand(".situ log on").action == LogAction::On, "on");
+        Check(ParseLogCommand(".situ log off").action == LogAction::Off, "off");
+        Check(ParseLogCommand(".situ log all").action == LogAction::FollowAll, "all");
+        Check(ParseLogCommand(".situ log none").action == LogAction::Unfollow, "none");
+        Check(ParseLogCommand(".situ log status").action == LogAction::Status, "status");
+        Check(ParseLogCommand(".situ log").action == LogAction::Help, "bare gives help");
+        Check(ParseLogCommand(".situ log   ").action == LogAction::Help, "bare with spaces gives help");
+        Check(ParseLogCommand(".situ log on extra").action == LogAction::Help, "extra words give help");
+
+        // Keywords are case-insensitive; so is the prefix.
+        Check(ParseLogCommand(".SITU LOG ON").action == LogAction::On, "upper-case keyword");
+        Check(ParseLogCommand("  .situ log off").action == LogAction::Off, "leading spaces");
+
+        // A callsign is anything that is not a keyword, upper-cased.
+        {
+            const LogCommand c = ParseLogCommand(".situ log aca123");
+            Check(c.action == LogAction::Follow, "callsign follows");
+            CheckEqual(c.arg, "ACA123", "callsign upper-cased");
+        }
+        {
+            const LogCommand c = ParseLogCommand(".situ log CGNQC");
+            Check(c.action == LogAction::Follow && c.arg == "CGNQC", "registration follows");
+        }
+
+        // Not ours.
+        Check(ParseLogCommand(".situ").action == LogAction::NotOurs, ".situ alone is not ours");
+        Check(ParseLogCommand(".situlog on").action == LogAction::NotOurs, "no space is not ours");
+        Check(ParseLogCommand(".am ACA123").action == LogAction::NotOurs, "other dot command");
+        Check(ParseLogCommand("hello").action == LogAction::NotOurs, "chat");
+        Check(ParseLogCommand("").action == LogAction::NotOurs, "empty");
+    }
+
     std::cout << "\n" << (g_checks - g_failures) << "/" << g_checks << " checks passed\n";
     if (g_failures != 0) { std::cout << g_failures << " FAILURES\n"; return 1; }
     std::cout << "OK\n";
