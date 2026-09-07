@@ -200,6 +200,47 @@ int main()
                    "snapshot fields in the documented order");
     }
 
+    // --- The on-change rule. Draw logs a line only when SnapshotChanged says so, so this
+    //     is the whole decision the DRAW output rests on. Every field is part of it: a
+    //     field left out of the comparison would silently stop being logged when it moved.
+    {
+        DrawSnapshot a;
+        a.flags = 6; a.corr = true; a.sqk = "4521"; a.trk = "QM"; a.tag = 1;
+        a.pps = "HEXAGON"; a.colour = "YELLOW"; a.tagfn = "ALPHA";
+
+        Check(!SnapshotChanged(&a, a), "identical snapshot is not a change");
+        Check(SnapshotChanged(nullptr, a), "first sighting is a change");
+
+        DrawSnapshot b = a; b.flags = 7;
+        Check(SnapshotChanged(&a, b), "flags change is a change");
+        b = a; b.corr = !a.corr;
+        Check(SnapshotChanged(&a, b), "corr change is a change");
+        b = a; b.adsb = !a.adsb;
+        Check(SnapshotChanged(&a, b), "adsb change is a change");
+        b = a; b.rvsm = !a.rvsm;
+        Check(SnapshotChanged(&a, b), "rvsm change is a change");
+        b = a; b.vfr = !a.vfr;
+        Check(SnapshotChanged(&a, b), "vfr change is a change");
+        b = a; b.sqk = "1200";
+        Check(SnapshotChanged(&a, b), "sqk change is a change");
+        b = a; b.trk = "YZ";
+        Check(SnapshotChanged(&a, b), "trk change is a change");
+        b = a; b.tag = 2;
+        Check(SnapshotChanged(&a, b), "tag change is a change");
+        b = a; b.pps = "ASTERISK";
+        Check(SnapshotChanged(&a, b), "pps change is a change");
+        b = a; b.colour = "ORANGE";
+        Check(SnapshotChanged(&a, b), "colour change is a change");
+        b = a; b.vf = !a.vf;
+        Check(SnapshotChanged(&a, b), "vf change is a change");
+        b = a; b.tagfn = "BRAVO";
+        Check(SnapshotChanged(&a, b), "tagfn change is a change");
+
+        // Unfollow clears the snapshot map, so the next follow of the same aircraft looks
+        // up nothing and gets a fresh baseline rather than resuming a stale comparison.
+        Check(SnapshotChanged(nullptr, a), "unfollow then follow logs a fresh baseline");
+    }
+
     std::cout << "\n" << (g_checks - g_failures) << "/" << g_checks << " checks passed\n";
     if (g_failures != 0) { std::cout << g_failures << " FAILURES\n"; return 1; }
     std::cout << "OK\n";

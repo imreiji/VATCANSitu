@@ -160,29 +160,45 @@ namespace SituLog
         return g_followAll;
     }
 
+    // Line, Warn and Draw run inside EuroScope callbacks, so a bad_alloc out of a string
+    // must not unwind across the DLL boundary: losing a log line beats taking down the host.
     void Line(const char* cat, const std::string& subject, const Fields& fields)
     {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        if (!g_enabled) { return; }
-        WriteLocked(FormatLine(NowForLine(), cat, subject, fields));
+        try
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            if (!g_enabled) { return; }
+            WriteLocked(FormatLine(NowForLine(), cat, subject, fields));
+        }
+        catch (...) { }
     }
 
     void Warn(const std::string& subject, const std::string& text)
     {
-        Line("WARN", subject, Fields().Add("text", text));
+        // Line already swallows; the guard here covers building the Fields argument.
+        try
+        {
+            Line("WARN", subject, Fields().Add("text", text));
+        }
+        catch (...) { }
     }
 
     void Draw(const std::string& callsign, const DrawSnapshot& now)
     {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        if (!g_enabled) { return; }
-        if (!g_followAll && g_followed.count(callsign) == 0) { return; }
+        try
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            if (!g_enabled) { return; }
+            if (!g_followAll && g_followed.count(callsign) == 0) { return; }
 
-        auto it = g_lastSnapshot.find(callsign);
-        if (it != g_lastSnapshot.end() && it->second == now) { return; }
+            auto it = g_lastSnapshot.find(callsign);
+            const DrawSnapshot* last = it != g_lastSnapshot.end() ? &it->second : nullptr;
+            if (!SnapshotChanged(last, now)) { return; }
 
-        g_lastSnapshot[callsign] = now;
-        WriteLocked(FormatLine(NowForLine(), "DRAW", callsign, SnapshotFields(now)));
+            g_lastSnapshot[callsign] = now;
+            WriteLocked(FormatLine(NowForLine(), "DRAW", callsign, SnapshotFields(now)));
+        }
+        catch (...) { }
     }
 
     std::string Status()

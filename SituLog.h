@@ -5,7 +5,8 @@
 // Rules, all of which the call sites depend on:
 //   - Nothing here calls the EuroScope SDK or touches GDI. Worker threads may call Line().
 //   - No entry point throws. A write failure disables the log; Status() says so.
-//   - Line() is a cheap boolean test when the log is off, so call sites need no guard.
+//   - Line() takes the mutex and returns at once when the log is off; the Fields argument
+//     is still built by the caller. Cheap at this plugin's refresh rate, not free.
 //
 // The pure parts - formatting, parsing, rotation, the snapshot - are in SituLogCore.h.
 

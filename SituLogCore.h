@@ -237,6 +237,13 @@ namespace SituLog
 
     inline bool operator!=(const DrawSnapshot& a, const DrawSnapshot& b) { return !(a == b); }
 
+    // The on-change rule behind DRAW: a line is due when there is no previous snapshot
+    // for the aircraft, or the new one differs from it in any field.
+    inline bool SnapshotChanged(const DrawSnapshot* last, const DrawSnapshot& now)
+    {
+        return last == nullptr || *last != now;
+    }
+
     inline Fields SnapshotFields(const DrawSnapshot& s)
     {
         return Fields()
