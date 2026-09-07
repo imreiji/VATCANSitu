@@ -217,7 +217,9 @@ CSiTRadar::CSiTRadar()
 		}
 
 		// TBS configuration, read once. A missing file leaves no airports configured,
-		// which turns the marker off rather than breaking anything.
+		// which turns the marker off rather than breaking anything - but it has to say
+		// so. It did not, and the first symptom of the file being one folder too high
+		// was "TBS stopped drawing", with nothing in the chat area to point at the cause.
 		{
 			const std::string tbsPath = wxRadar::getSituWxDir() + "SituTBS.txt";
 			std::ifstream tbsFile(tbsPath.c_str(), std::ios::binary);
@@ -235,6 +237,21 @@ CSiTRadar::CSiTRadar()
 						("SituTBS.txt: " + std::to_string(bad) + " line(s) not understood and ignored").c_str(),
 						true, true, false, false, false);
 				}
+
+				// An empty airport list is the same outcome as no file, and just as quiet
+				// without this.
+				if (tbsConfig.airports.empty()) {
+					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "TBS",
+						"SituTBS.txt names no airports; TBS markers are off",
+						true, true, false, false, false);
+				}
+			}
+			else {
+				// The full path, because the folder is resolved from the DLL and the
+				// obvious guess - beside the DLL, or beside EuroScope.exe - is wrong.
+				GetPlugIn()->DisplayUserMessage("VATCAN Situ", "TBS",
+					("SituTBS.txt not found at " + tbsPath + "; TBS markers are off").c_str(),
+					true, true, false, false, false);
 			}
 		}
 
@@ -260,6 +277,11 @@ CSiTRadar::CSiTRadar()
 							+ " is claimed by more than one station; the callsign prefix decides").c_str(),
 						true, true, false, false, false);
 				}
+			}
+			else {
+				GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+					("SituCPDLC.txt not found at " + cpdlcPath + "; no CPDLC stations are known").c_str(),
+					true, true, false, false, false);
 			}
 		}
 
@@ -661,12 +683,13 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 					AddScreenObject(AIRCRAFT_SYMBOL, callSign.c_str(), prect, FALSE, "");
 
 					// display CJS
-					// Decided before the gate below, because an uncorrelated VFR target -
-					// a 1200 squawk with no flight plan behind it - does not pass that
-					// gate and is exactly the case that needs the marker. Empty string
+					// Decided before the gate below, because an uncorrelated 1200 return -
+					// the only uncorrelated case that gets the marker - does not pass that
+					// gate. A correlated return gets it on a VFR flight plan alone. Empty string
 					// for the field because the CJS is initialised from the tracking id
 					// just below, so the two are empty together.
 					const bool vfMarker = SituTag::ShowsVfrJurisdiction(
+						isCorrelated,
 						CSiTRadar::mAcData[callSign].hasVFRFP,
 						radarTarget.GetPosition().GetSquawk(),
 						GetPlugIn()->FlightPlanSelect(callSign.c_str()).GetTrackingControllerId(),
@@ -1143,12 +1166,13 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 					}
 
 					// show CJS for controller tracking aircraft // or if in handoff mode, show the target controller's CJS
-					// Decided before the gate below, because an uncorrelated VFR target -
-					// a 1200 squawk with no flight plan behind it - does not pass that
-					// gate and is exactly the case that needs the marker. Empty string
+					// Decided before the gate below, because an uncorrelated 1200 return -
+					// the only uncorrelated case that gets the marker - does not pass that
+					// gate. A correlated return gets it on a VFR flight plan alone. Empty string
 					// for the field because the CJS is initialised from the tracking id
 					// just below, so the two are empty together.
 					const bool vfMarker = SituTag::ShowsVfrJurisdiction(
+						isCorrelated,
 						CSiTRadar::mAcData[callSign].hasVFRFP,
 						radarTarget.GetPosition().GetSquawk(),
 						GetPlugIn()->FlightPlanSelect(callSign.c_str()).GetTrackingControllerId(),
