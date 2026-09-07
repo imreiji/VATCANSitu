@@ -4,6 +4,8 @@
 #include "constants.h"
 #include "ACTag.h"
 #include "CFontHelper.h"
+#include "wxRadar.h"
+#include "SituLog.h"
 
 const int TAG_ITEM_IFR_REL = 5000;
 const int TAG_FUNC_IFR_REL_REQ = 5001;
@@ -836,4 +838,71 @@ void SituPlugin::OnCompilePrivateChat(const char* sSenderCallsign,
     if (entry->second.pointOutFromMe && !strcmp(msg.c_str(), "OK")) {
         entry->second.POAcceptTime = clock();
     }
+}
+
+bool SituPlugin::OnCompileCommand(const char* sCommandLine)
+{
+    const SituLog::LogCommand command = SituLog::ParseLogCommand(sCommandLine != nullptr ? sCommandLine : "");
+    if (command.action == SituLog::LogAction::NotOurs) { return false; }
+
+    auto say = [this](const std::string& text) {
+        DisplayUserMessage("VATCAN Situ", "Log", text.c_str(), true, true, false, false, false);
+    };
+
+    // Record the command itself when the log is open. For "on" the open line covers it.
+    SituLog::Line("CMD", "log", SituLog::Fields().Add("args", std::string(sCommandLine != nullptr ? sCommandLine : "")));
+
+    switch (command.action)
+    {
+    case SituLog::LogAction::On:
+    {
+        const SituLog::EnableResult r = SituLog::Enable(wxRadar::getSituWxDir());
+        say(r.ok ? "Logging to " + r.path : "Log NOT started: " + r.error);
+        break;
+    }
+    case SituLog::LogAction::Off:
+    {
+        const size_t lines = SituLog::LinesWritten();
+        SituLog::Disable();
+        say("Log closed, " + std::to_string(lines) + " lines.");
+        break;
+    }
+    case SituLog::LogAction::Follow:
+    {
+        if (!SituLog::IsEnabled())
+        {
+            const SituLog::EnableResult r = SituLog::Enable(wxRadar::getSituWxDir());
+            if (!r.ok) { say("Log NOT started: " + r.error); break; }
+            say("Logging to " + r.path);
+        }
+        SituLog::Follow(command.arg);
+        say("Following " + command.arg + ".");
+        break;
+    }
+    case SituLog::LogAction::FollowAll:
+    {
+        if (!SituLog::IsEnabled())
+        {
+            const SituLog::EnableResult r = SituLog::Enable(wxRadar::getSituWxDir());
+            if (!r.ok) { say("Log NOT started: " + r.error); break; }
+            say("Logging to " + r.path);
+        }
+        SituLog::Follow("ALL");
+        say("Following all aircraft - this is heavy; use .situ log none to stop.");
+        break;
+    }
+    case SituLog::LogAction::Unfollow:
+        SituLog::Unfollow();
+        say("Following nothing.");
+        break;
+    case SituLog::LogAction::Status:
+        say(SituLog::Status());
+        break;
+    case SituLog::LogAction::Help:
+    default:
+        say(".situ log on | off | status | none | all | <CALLSIGN>");
+        say("on/off start and stop the file; <CALLSIGN> or all also log draw decisions; none stops following.");
+        break;
+    }
+    return true;
 }
