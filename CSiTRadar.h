@@ -436,6 +436,7 @@ public:
 
         fp.GetControllerAssignedData().SetScratchPadString(newstring.c_str());
         fp.GetFlightPlanData().AmendFlightPlan();
+        SituLog::Line("ES>", "SCRATCHPAD", SituLog::Fields().Add("callsign", fp.GetCallsign()).Add("was", scratchpad).Add("now", newstring).Add("via", "sfi"));
         return true;
     }
 
@@ -482,7 +483,9 @@ public:
     static void SendPointOut(const char* target, const char* message, CFlightPlan* fp) {
 
         fp->GetControllerAssignedData().SetFlightStripAnnotation(0, message);
+        SituLog::Line("ES>", "ANNOT", SituLog::Fields().Add("callsign", fp->GetCallsign()).Add("index", 0).Add("now", message).Add("why", "pointout"));
         fp->PushFlightStrip(CSiTRadar::m_pRadScr->GetPlugIn()->ControllerSelectByPositionId(target).GetCallsign());
+        SituLog::Line("ES>", "STRIP-PUSH", SituLog::Fields().Add("callsign", fp->GetCallsign()).Add("to", target));
 
     }
 
@@ -495,6 +498,7 @@ public:
 
         fp.GetControllerAssignedData().SetScratchPadString(newstring.c_str());
         fp.GetFlightPlanData().AmendFlightPlan();
+        SituLog::Line("ES>", "SCRATCHPAD", SituLog::Fields().Add("callsign", fp.GetCallsign()).Add("was", scratchpad).Add("now", newstring).Add("via", "remarks"));
         return true;
     }
     inline  virtual void  OnFlightPlanFlightStripPushed(CFlightPlan FlightPlan,

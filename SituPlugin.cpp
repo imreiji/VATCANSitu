@@ -184,6 +184,7 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     CSiTRadar::m_pRadScr->GetPlugIn()->FlightPlanSelect(parentWin->m_callsign.c_str()).InitiateHandoff(
                         CSiTRadar::m_pRadScr->GetPlugIn()->ControllerSelectByPositionId(focusedField->m_text.c_str()).GetCallsign()
                     );
+                    SituLog::Line("ES>", "HANDOFF", SituLog::Fields().Add("callsign", parentWin->m_callsign).Add("to", focusedField->m_text).Add("via", "typed"));
                     // Closing the window destroys parentWin and focusedField - nothing
                     // below may touch them.
                     CSiTRadar::CloseWindow(parentWin->m_windowId_);
@@ -780,8 +781,9 @@ inline void SituPlugin::OnFunctionCall(int FunctionId, const char* sItemString, 
             ? ReleaseState::Requested
             : ReleaseState::None;
 
-        fp.GetControllerAssignedData().SetScratchPadString(
-            ScratchpadWithRelease(spString, next).c_str());
+        const string newSpString = ScratchpadWithRelease(spString, next);
+        fp.GetControllerAssignedData().SetScratchPadString(newSpString.c_str());
+        SituLog::Line("ES>", "SCRATCHPAD", SituLog::Fields().Add("callsign", fp.GetCallsign()).Add("was", spString).Add("now", newSpString).Add("via", "ifr-release"));
     }
 
     if (FunctionId == TAG_FUNC_IFR_RELEASED) {
@@ -790,8 +792,9 @@ inline void SituPlugin::OnFunctionCall(int FunctionId, const char* sItemString, 
         if (ControllerMyself().GetFacility() >= 5) {
 
             if (ParseScratchpad(spString).release == ReleaseState::Requested) {
-                fp.GetControllerAssignedData().SetScratchPadString(
-                    ScratchpadWithRelease(spString, ReleaseState::Granted).c_str());
+                const string newSpString = ScratchpadWithRelease(spString, ReleaseState::Granted);
+                fp.GetControllerAssignedData().SetScratchPadString(newSpString.c_str());
+                SituLog::Line("ES>", "SCRATCHPAD", SituLog::Fields().Add("callsign", fp.GetCallsign()).Add("was", spString).Add("now", newSpString).Add("via", "ifr-release"));
             }
         }
     }

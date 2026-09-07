@@ -835,6 +835,7 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 							if (sqitr == menuState.squawkCodes.end()) {
 
 								radarTarget.Uncorrelate();
+								SituLog::Line("ES>", "UNCORRELATE", SituLog::Fields().Add("callsign", callSign).Add("why", "no-code-match").Add("squawk", radarTarget.GetPosition().GetSquawk()));
 
 							}
 
@@ -850,6 +851,7 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 									if (sqitr->numCorrelatedRT == 0) {
 
 										radarTarget.CorrelateWithFlightPlan(GetPlugIn()->FlightPlanSelect(sqitr->fpcs.c_str()));
+										SituLog::Line("ES>", "CORRELATE", SituLog::Fields().Add("callsign", callSign).Add("squawk", radarTarget.GetPosition().GetSquawk()).Add("fp", sqitr->fpcs));
 										sqitr->numCorrelatedRT++;
 										mAcData[callSign].multipleDiscrete = false;
 									}
@@ -858,6 +860,7 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 										// Multiple discrete offender handling, squawk should be forced on and it should flash, and it should not correlate
 										radarTarget.Uncorrelate();
+										SituLog::Line("ES>", "UNCORRELATE", SituLog::Fields().Add("callsign", callSign).Add("why", "multiple-discrete").Add("squawk", radarTarget.GetPosition().GetSquawk()));
 										mAcData[callSign].multipleDiscrete = true;
 
 										// Reported by the message list, which reads this
@@ -893,10 +896,12 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 						// No radar at all. Never allow an association to stand, which is
 						// what the original radarFlags == 0 clause said.
 						radarTarget.Uncorrelate();
+						SituLog::Line("ES>", "UNCORRELATE", SituLog::Fields().Add("callsign", callSign).Add("why", "no-radar"));
 						mAcData[callSign].autoCorrelationCleared = false;
 					}
 					else if (!mAcData[callSign].autoCorrelationCleared) {
 						radarTarget.Uncorrelate();
+						SituLog::Line("ES>", "UNCORRELATE", SituLog::Fields().Add("callsign", callSign).Add("why", "primary-only"));
 						mAcData[callSign].autoCorrelationCleared = true;
 					}
 
@@ -1157,6 +1162,7 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 							// Clear the entry used for pointout coordination
 							radarTarget.GetCorrelatedFlightPlan().GetControllerAssignedData().SetFlightStripAnnotation(0, "");
+							SituLog::Line("ES>", "ANNOT", SituLog::Fields().Add("callsign", callSign).Add("index", 0).Add("now", "").Add("why", "handoff-started"));
 						}
 					}
 					else {
@@ -1177,6 +1183,7 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 							// handoff cleared the point-out annotation on the selected
 							// aircraft and pushed its strip to that aircraft's POTarget.
 							GetPlugIn()->FlightPlanSelect(callSign.c_str()).GetControllerAssignedData().SetFlightStripAnnotation(1, "");
+							SituLog::Line("ES>", "ANNOT", SituLog::Fields().Add("callsign", callSign).Add("index", 1).Add("now", "").Add("why", "handoff-accepted"));
 							SendPointOut(mAcData[callSign].POTarget.c_str(), "", &GetPlugIn()->FlightPlanSelect(callSign.c_str()));
 
 							mAcData[callSign].pointOutFromMe = false;
@@ -3141,6 +3148,7 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 						c = lelem.m_ListBoxElementText;
 						menuState.radarScrWindows.erase(stoi(id));
 						GetPlugIn()->FlightPlanSelect(cs.c_str()).GetControllerAssignedData().SetDirectToPointName(c.c_str());
+						SituLog::Line("ES>", "DIRECT", SituLog::Fields().Add("callsign", cs).Add("fix", c));
 
 						const CPosition ppos = GetPlugIn()->RadarTargetSelect(cs.c_str()).GetPosition().GetPosition();
 						string pposStr = SituPosition::FormatPositionString(ppos.m_Latitude, ppos.m_Longitude);
@@ -3160,6 +3168,7 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 
 						GetPlugIn()->FlightPlanSelect(cs.c_str()).GetFlightPlanData().SetRoute(rtestr.c_str());
 						GetPlugIn()->FlightPlanSelect(cs.c_str()).GetFlightPlanData().AmendFlightPlan();
+						SituLog::Line("ES>", "ROUTE", SituLog::Fields().Add("callsign", cs).Add("now", SituLog::Truncate(rtestr, 60)).Add("amended", true));
 
 						mAcData[cs].directToLineOn = false;
 						mAcData[cs].directToPendingPosition.m_Latitude = 0.0;
@@ -3177,6 +3186,7 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 			}
 
 			GetPlugIn()->FlightPlanSelect(cs.c_str()).GetControllerAssignedData().SetDirectToPointName(c.c_str());
+			SituLog::Line("ES>", "DIRECT", SituLog::Fields().Add("callsign", cs).Add("fix", c));
 			menuState.radarScrWindows.erase(stoi(id));
 			mAcData[cs].directToLineOn = false;
 			mAcData[cs].directToPendingPosition.m_Latitude = 0.0;
@@ -3483,6 +3493,8 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 	if (ObjectType == BUTTON_MENU_RMB_MENU) {
 		if (!strcmp(sObjectId, "AutoHandoff")) {
 			GetPlugIn()->FlightPlanSelectASEL().InitiateHandoff(GetPlugIn()->FlightPlanSelectASEL().GetCoordinatedNextController());
+			CFlightPlan handedOff = GetPlugIn()->FlightPlanSelectASEL();
+			SituLog::Line("ES>", "HANDOFF", SituLog::Fields().Add("callsign", handedOff.GetCallsign()).Add("to", handedOff.GetCoordinatedNextController()).Add("via", "auto"));
 			menuState.MB3menu = false;
 		}
 		if (!strcmp(sObjectId, "FltPlan")) {
@@ -3492,14 +3504,17 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 		if (!strcmp(sObjectId, "AssumeTrack")) {
 			menuState.MB3menu = false;
 			GetPlugIn()->FlightPlanSelectASEL().StartTracking();
+			SituLog::Line("ES>", "TRACK", SituLog::Fields().Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign()));
 		}
 		if (!strcmp(sObjectId, "DropTrack")) {
 			menuState.MB3menu = false;
 			GetPlugIn()->FlightPlanSelectASEL().EndTracking();
+			SituLog::Line("ES>", "UNTRACK", SituLog::Fields().Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign()));
 		}
 		if (!strcmp(sObjectId, "Decorrelate")) {
 			menuState.MB3menu = false;
 			GetPlugIn()->FlightPlanSelectASEL().Uncorrelate();
+			SituLog::Line("ES>", "UNCORRELATE", SituLog::Fields().Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign()).Add("why", "menu"));
 		}		
 
 		if (!strcmp(sObjectId, "DirectTo")) {
@@ -3578,6 +3593,7 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 			menuState.MB3menu = false;
 			mAcData[GetPlugIn()->FlightPlanSelectASEL().GetCallsign()].pointOutFromMe = false;
 			GetPlugIn()->FlightPlanSelectASEL().GetControllerAssignedData().SetFlightStripAnnotation(1, "");
+			SituLog::Line("ES>", "ANNOT", SituLog::Fields().Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign()).Add("index", 1).Add("now", "").Add("why", "pointout-recall"));
 			SendPointOut(mAcData[GetPlugIn()->FlightPlanSelectASEL().GetCallsign()].POTarget.c_str(), "", &GetPlugIn()->FlightPlanSelect(GetPlugIn()->FlightPlanSelectASEL().GetCallsign()));
 
 			mAcData[GetPlugIn()->FlightPlanSelectASEL().GetCallsign()].POTarget = "";
@@ -3643,6 +3659,7 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 			}
 
 			GetPlugIn()->FlightPlanSelectASEL().InitiateHandoff(GetPlugIn()->ControllerSelectByPositionId(sObjectId).GetCallsign());
+			SituLog::Line("ES>", "HANDOFF", SituLog::Fields().Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign()).Add("to", sObjectId).Add("via", "menu"));
 		}
 		if (!strcmp(menuState.MB3SecondaryMenuType.c_str(), "ModSFI")) {
 			ModifySFI(sObjectId, GetPlugIn()->FlightPlanSelectASEL());
@@ -3657,6 +3674,7 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 		if (!strcmp(menuState.MB3SecondaryMenuType.c_str(), "SetComm")) {
 			menuState.MB3menu = false;
 			GetPlugIn()->FlightPlanSelectASEL().GetControllerAssignedData().SetCommunicationType(*sObjectId);
+			SituLog::Line("ES>", "COMM", SituLog::Fields().Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign()).Add("type", std::string(1, *sObjectId)));
 		}
 		if (!strcmp(menuState.MB3SecondaryMenuType.c_str(), "PointOut")) {
 			menuState.MB3menu = false;
@@ -4051,6 +4069,7 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 		if (Button == BUTTON_LEFT) {
 			if (mAcData[sObjectId].isHandoffToMe == TRUE) {
 				GetPlugIn()->FlightPlanSelect(sObjectId).AcceptHandoff();
+				SituLog::Line("ES>", "HO-ACCEPT", SituLog::Fields().Add("callsign", sObjectId));
 			}
 			else {
 				StartTagFunction(sObjectId, NULL, TAG_ITEM_TYPE_PLANE_TYPE, sObjectId, NULL, TAG_ITEM_FUNCTION_TOGGLE_ROUTE_DRAW, Pt, Area);
