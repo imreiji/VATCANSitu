@@ -188,10 +188,7 @@ void CACTag::DrawFPACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		{
 			wtSymbol = "-";
 		}
-		// Canadian registrations lose the nationality C on the tag - CGABC is drawn GABC.
-	// After the lookups above, never before: cs is a FlightPlanSelect key up there and
-	// a shortened key finds nothing. Hit testing keeps using fp->GetCallsign().
-	cs = SituTag::DisplayCallsign(cs) + wtSymbol;
+		cs = cs + wtSymbol;
 
 		fp->GetClearedAltitude();
 
@@ -285,10 +282,7 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		string(rad->GetPlugIn()->FlightPlanSelect(cs.c_str()).GetFlightPlanData().GetAircraftFPType()) == "B753") {
 		wtSymbol = "/";
 	}
-	// Canadian registrations lose the nationality C on the tag - CGABC is drawn GABC.
-	// After the lookups above, never before: cs is a FlightPlanSelect key up there and
-	// a shortened key finds nothing. Hit testing keeps using fp->GetCallsign().
-	cs = SituTag::DisplayCallsign(cs) + wtSymbol;
+	cs = cs + wtSymbol;
 
 	char commTypeChar = tolower(fp->GetControllerAssignedData().GetCommunicationType());
 	if (commTypeChar == '\0')
@@ -1114,9 +1108,8 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 			ucs.top = p.y - 7;
 			ucs.left = p.x + 10;
 
-			// In full, never shortened. A correlated Canadian registration loses its
-			// nationality C because a flight plan says who the aircraft is; here nothing
-			// does, so the tag shows exactly what is being broadcast and nothing else.
+			// Exactly what is being broadcast: no flight plan has confirmed the identity,
+			// so nothing is added to it either - not even the weight symbol.
 			const std::string adsbCallsign = rt->GetCallsign();
 			dc->DrawText(adsbCallsign.c_str(), &ucs, DT_LEFT | DT_CALCRECT);
 			dc->DrawText(adsbCallsign.c_str(), &ucs, DT_LEFT);
@@ -1181,10 +1174,7 @@ void CACTag::DrawNARDSTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightP
 	{
 		wtSymbol = "-";
 	}
-	// Canadian registrations lose the nationality C on the tag - CGABC is drawn GABC.
-	// After the lookups above, never before: cs is a FlightPlanSelect key up there and
-	// a shortened key finds nothing. Hit testing keeps using fp->GetCallsign().
-	cs = SituTag::DisplayCallsign(cs) + wtSymbol;
+	cs = cs + wtSymbol;
 
 	char commTypeChar = tolower(fp->GetControllerAssignedData().GetCommunicationType());
 	if (commTypeChar == '\0')
