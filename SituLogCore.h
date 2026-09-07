@@ -51,12 +51,18 @@ namespace SituLog
 
     // A value is quoted when a reader could otherwise mis-split it: a space ends a pair, an
     // equals sign starts a value, a quote opens one. Internal quotes are doubled, CSV style.
+    //
+    // CR and LF are quoted too, but quoting alone cannot save them: one record is one line, and
+    // the reader has no continuation rule, so a raw newline would end the record early and leave
+    // its tail reading as a corrupt one. They are therefore escaped to the two characters \r and
+    // \n. The values here are EuroScope free text -- controller remarks, the scratchpad, route
+    // strings -- so embedded newlines are expected, not exotic.
     inline std::string QuoteValue(const std::string& value)
     {
         bool needsQuotes = false;
         for (char c : value)
         {
-            if (c == ' ' || c == '"' || c == '=') { needsQuotes = true; break; }
+            if (c == ' ' || c == '"' || c == '=' || c == '\r' || c == '\n') { needsQuotes = true; break; }
         }
         if (!needsQuotes) { return value; }
 
@@ -65,6 +71,8 @@ namespace SituLog
         out += '"';
         for (char c : value)
         {
+            if (c == '\r') { out += "\\r"; continue; }
+            if (c == '\n') { out += "\\n"; continue; }
             if (c == '"') { out += '"'; }
             out += c;
         }

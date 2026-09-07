@@ -61,9 +61,20 @@ int main()
         CheckEqual(QuoteValue("plain"), "plain", "plain not quoted");
         CheckEqual(QuoteValue(""), "", "empty stays empty");
 
+        // A raw CR or LF would end the record early and leave its tail reading as a corrupt
+        // one, so both are escaped rather than merely quoted.
+        CheckEqual(QuoteValue("a\nb"), "\"a\\nb\"", "newline escaped and quoted");
+        CheckEqual(QuoteValue("a\r\nb"), "\"a\\r\\nb\"", "CRLF escaped and quoted");
+
         CheckEqual(FormatLine("00:00:00.000", "EVT", "FP-DATA", Fields().Add("rmk", "").Add("route", "A B")),
                    "00:00:00.000 EVT  FP-DATA     rmk= route=\"A B\"",
                    "empty value visible as key=, spaced value quoted");
+
+        CheckEqual(FormatLine("00:00:00.000", "EVT", "FP-DATA", Fields().Add("rmk", "L1\nL2")),
+                   "00:00:00.000 EVT  FP-DATA     rmk=\"L1\\nL2\"",
+                   "a multi-line remark stays on one log line");
+        Check(FormatLine("00:00:00.000", "EVT", "X", Fields().Add("v", "a\nb")).find('\n') == std::string::npos,
+              "no raw newline survives into the line");
 
         // Typed adds.
         CheckEqual(FormatLine("00:00:00.000", "DRAW", "X", Fields().Add("corr", true).Add("adsb", false).Add("flags", 6).Add("ms", 12.5)),
