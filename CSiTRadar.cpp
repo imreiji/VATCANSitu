@@ -95,6 +95,8 @@ void CSiTRadar::StartCPDLCPoll()
 	}
 
 	std::thread poll([]() {
+		// SituLog only on this thread - it takes its own mutex and never calls the SDK.
+		const auto t0 = std::chrono::steady_clock::now();
 		std::string raw = CPDLCMessage::PollCPDLCMessages();
 
 		SCPDLCPollResult result;
@@ -112,6 +114,13 @@ void CSiTRadar::StartCPDLCPoll()
 		}
 
 		result.ready = true;
+
+		SituLog::Line("NET", "cpdlc-poll", SituLog::Fields()
+			.Add("ok", result.severity == SituCpdlcErrors::Ok)
+			.Add("messages", static_cast<int>(result.messages.size()))
+			.Add("error", result.error)
+			.Add("ms", static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::steady_clock::now() - t0).count())));
 
 		// A peek only applies to the first fetch after logon; later fetches poll, which
 		// consumes. Flipped here on the worker rather than at the call site, because the
@@ -185,6 +194,7 @@ void CSiTRadar::DrainCPDLCPoll()
 		if (fatal || text != cpdlcLastReportedError) {
 			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Hoppie CPDLC", text.c_str(),
 				true, false, false, false, false);
+			SituLog::Warn("Hoppie CPDLC", text);
 			cpdlcLastReportedError = text;
 		}
 
@@ -196,6 +206,7 @@ void CSiTRadar::DrainCPDLCPoll()
 	if (!cpdlcLastReportedError.empty()) {
 		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Hoppie CPDLC",
 			"CPDLC fetch recovered.", true, false, false, false, false);
+		SituLog::Warn("Hoppie CPDLC", "CPDLC fetch recovered.");
 		cpdlcLastReportedError.clear();
 	}
 	cpdlcConsecutiveFailures = 0;
@@ -217,9 +228,10 @@ void CSiTRadar::DrainCPDLCPoll()
 		// With no tag on screen there is no mnemonic to raise and no window to open from,
 		// so the chat area is the only place this can surface.
 		if (firstSighting) {
-			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-				(message.sender + " (not on scope): " + message.rawMessageContent).c_str(),
+			const std::string msg = message.sender + " (not on scope): " + message.rawMessageContent;
+			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(),
 				true, true, false, false, false);
+			SituLog::Warn("CPDLC", msg);
 		}
 
 		if (message.opensMnemonic) {
@@ -291,10 +303,17 @@ CSiTRadar::CSiTRadar()
 				// Say what was thrown away. A separation figure that failed to load is
 				// the worst thing in that file to be quiet about.
 				const size_t bad = tbsParsed.skippedLines.size() + tbsConfig.rejectedLines.size();
+
+				SituLog::Line("NET", "SituTBS.txt", SituLog::Fields().Add("path", tbsPath).Add("found", true)
+					.Add("airports", static_cast<int>(tbsConfig.airports.size()))
+					.Add("rules", static_cast<int>(tbsConfig.separation.size()))
+					.Add("rejected", static_cast<int>(bad)));
+
 				if (bad != 0) {
-					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "TBS",
-						("SituTBS.txt: " + std::to_string(bad) + " line(s) not understood and ignored").c_str(),
+					const std::string msg = "SituTBS.txt: " + std::to_string(bad) + " line(s) not understood and ignored";
+					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "TBS", msg.c_str(),
 						true, true, false, false, false);
+					SituLog::Warn("TBS", msg);
 				}
 
 				// An empty airport list is the same outcome as no file, and just as quiet
@@ -303,14 +322,18 @@ CSiTRadar::CSiTRadar()
 					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "TBS",
 						"SituTBS.txt names no airports; TBS markers are off",
 						true, true, false, false, false);
+					SituLog::Warn("TBS", "SituTBS.txt names no airports; TBS markers are off");
 				}
 			}
 			else {
+				SituLog::Line("NET", "SituTBS.txt", SituLog::Fields().Add("path", tbsPath).Add("found", false));
+
 				// The full path, because the folder is resolved from the DLL and the
 				// obvious guess - beside the DLL, or beside EuroScope.exe - is wrong.
-				GetPlugIn()->DisplayUserMessage("VATCAN Situ", "TBS",
-					("SituTBS.txt not found at " + tbsPath + "; TBS markers are off").c_str(),
+				const std::string msg = "SituTBS.txt not found at " + tbsPath + "; TBS markers are off";
+				GetPlugIn()->DisplayUserMessage("VATCAN Situ", "TBS", msg.c_str(),
 					true, true, false, false, false);
+				SituLog::Warn("TBS", msg);
 			}
 		}
 
@@ -324,23 +347,35 @@ CSiTRadar::CSiTRadar()
 				CPDLCMessage::dclTable = SituCpdlcDcl::Parse(cpdlcParsed);
 				cpdlcFreetext = SituCpdlcFreetext::Parse(cpdlcParsed);
 
+				SituLog::Line("NET", "SituCPDLC.txt", SituLog::Fields().Add("path", cpdlcPath).Add("found", true)
+					.Add("stations", static_cast<int>(cpdlcStations.stations.size()))
+					.Add("dcl", static_cast<int>(CPDLCMessage::dclTable.rules.size()))
+					.Add("freetext", static_cast<int>(cpdlcFreetext.entries.size()))
+					.Add("skipped", static_cast<int>(cpdlcStations.skippedLines.size()))
+					.Add("duplicates", static_cast<int>(cpdlcStations.duplicateControllerIds.size())));
+
 				if (!cpdlcStations.skippedLines.empty()) {
-					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-						("SituCPDLC.txt: " + std::to_string(cpdlcStations.skippedLines.size())
-							+ " line(s) not understood and ignored").c_str(),
+					const std::string msg = "SituCPDLC.txt: " + std::to_string(cpdlcStations.skippedLines.size())
+						+ " line(s) not understood and ignored";
+					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(),
 						true, true, false, false, false);
+					SituLog::Warn("CPDLC", msg);
 				}
 				for (const std::string& duplicate : cpdlcStations.duplicateControllerIds) {
-					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-						("SituCPDLC.txt: controller id " + duplicate
-							+ " is claimed by more than one station; the callsign prefix decides").c_str(),
+					const std::string msg = "SituCPDLC.txt: controller id " + duplicate
+						+ " is claimed by more than one station; the callsign prefix decides";
+					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(),
 						true, true, false, false, false);
+					SituLog::Warn("CPDLC", msg);
 				}
 			}
 			else {
-				GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-					("SituCPDLC.txt not found at " + cpdlcPath + "; no CPDLC stations are known").c_str(),
+				SituLog::Line("NET", "SituCPDLC.txt", SituLog::Fields().Add("path", cpdlcPath).Add("found", false));
+
+				const std::string msg = "SituCPDLC.txt not found at " + cpdlcPath + "; no CPDLC stations are known";
+				GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(),
 					true, true, false, false, false);
+				SituLog::Warn("CPDLC", msg);
 			}
 		}
 
@@ -375,6 +410,7 @@ CSiTRadar::CSiTRadar()
 				GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings",
 					"settings.json could not be read; starting from defaults",
 					true, true, false, false, false);
+				SituLog::Warn("Settings", "settings.json could not be read; starting from defaults");
 			}
 		}
 
@@ -387,6 +423,10 @@ CSiTRadar::CSiTRadar()
 		// blank SituLocal.txt in beside their existing settings.json - the credential was
 		// recovered and then immediately discarded, and Hoppie answered "no logon code".
 		SituSettings::FillEmptyFrom(local, migratedLocal);
+
+		SituLog::Line("NET", "settings", SituLog::Fields().Add("path", settingsPath)
+			.Add("found", SituFiles::Exists(settingsPath)).Add("local", SituFiles::Exists(localPath))
+			.Add("migrated", migratedFromJson));
 
 		wxRadar::wxLatCtr = settings.wxLat;
 		wxRadar::wxLongCtr = settings.wxLong;
@@ -413,15 +453,17 @@ CSiTRadar::CSiTRadar()
 		// Say what was thrown away rather than dropping it quietly.
 		const size_t badLines = settings.skippedLines.size() + local.skippedLines.size();
 		if (badLines != 0) {
-			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings",
-				(std::to_string(badLines) + " settings line(s) not understood and ignored").c_str(),
+			const std::string msg = std::to_string(badLines) + " settings line(s) not understood and ignored";
+			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings", msg.c_str(),
 				true, true, false, false, false);
+			SituLog::Warn("Settings", msg);
 		}
 
 		if (migratedFromJson) {
 			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings",
 				"settings.json migrated to settings.txt; the logon code moved to SituLocal.txt",
 				true, true, false, false, false);
+			SituLog::Warn("Settings", "settings.json migrated to settings.txt; the logon code moved to SituLocal.txt");
 		}
 	}
 	catch (const std::exception& e) {
@@ -434,9 +476,10 @@ CSiTRadar::CSiTRadar()
 		// constructor called from OnRadarScreenCreated must not let anything out: an
 		// exception leaving an SDK callback unwinds through frames built by a different
 		// compiler in a separately linked binary.
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings",
-			(string("settings load failed: ") + e.what()).c_str(),
+		const std::string msg = string("settings load failed: ") + e.what();
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings", msg.c_str(),
 			true, true, false, false, false);
+		SituLog::Warn("Settings", msg);
 	}
 
 	try {
@@ -468,6 +511,7 @@ CSiTRadar::CSiTRadar()
 	}
 	catch (...) {
 		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "WX Parser", string("PNG Failed to Parse").c_str(), true, false, false, false, false);
+		SituLog::Warn("WX Parser", "PNG Failed to Parse");
 	}
 
 	CSiTRadar::mAcData.reserve(256);
@@ -566,6 +610,7 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 		// the weather warnings.
 		const char* handler = (message.responseCode == ASYNC_MESSAGE_CPDLC) ? "CPDLC" : "Warning";
 		GetPlugIn()->DisplayUserMessage("VATCAN Situ", handler, message.reponseMessage.c_str(), true, false, false, false, false);
+		SituLog::Warn("async", message.reponseMessage);
 	}
 
 #pragma region timers
@@ -2427,8 +2472,9 @@ void CSiTRadar::DispatchCPDLCUplink(CPDLCMessage uplink, const std::string& call
 	// "sending", not "sent". Whether it arrived is not known for up to five seconds, and
 	// a failure line follows if it did not. Success stays quiet rather than putting two
 	// lines in the chat area for every uplink.
-	GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-		(callsign + ": sending - " + preview).c_str(), true, true, false, false, false);
+	const std::string sendingMsg = callsign + ": sending - " + preview;
+	GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", sendingMsg.c_str(), true, true, false, false, false);
+	SituLog::Warn("CPDLC", sendingMsg);
 
 	RequestRefresh();
 }
@@ -2467,8 +2513,9 @@ CPDLCMessage* CSiTRadar::LatestOpenDownlink(const std::string& callsign)
 void CSiTRadar::AcceptCPDLCLogon(const std::string& callsign)
 {
 	if (mAcData[callsign].cpdlcState == CPDLC_CONNECTED) {
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-			(callsign + ": already connected").c_str(), true, true, false, false, false);
+		const std::string msg = callsign + ": already connected";
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(), true, true, false, false, false);
+		SituLog::Warn("CPDLC", msg);
 		return;
 	}
 
@@ -2521,8 +2568,9 @@ std::string CSiTRadar::TerminatingReplyType()
 void CSiTRadar::EndCPDLCService(const std::string& callsign)
 {
 	if (mAcData[callsign].cpdlcState != CPDLC_CONNECTED) {
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-			(callsign + ": not connected").c_str(), true, true, false, false, false);
+		const std::string msg = callsign + ": not connected";
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(), true, true, false, false, false);
+		SituLog::Warn("CPDLC", msg);
 		return;
 	}
 
@@ -2544,9 +2592,10 @@ void CSiTRadar::SendCPDLCFreetext(const std::string& callsign, const std::string
 	if (entry == nullptr) {
 		// A button with nothing behind it says so. Sending a message the controller did
 		// not choose, with a reply type nobody set, is the worse outcome.
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-			(label + ": no such message in SituCPDLC.txt [FREETEXT]").c_str(),
+		const std::string msg = label + ": no such message in SituCPDLC.txt [FREETEXT]";
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(),
 			true, true, false, false, false);
+		SituLog::Warn("CPDLC", msg);
 		return;
 	}
 
@@ -2660,8 +2709,9 @@ void CSiTRadar::StageCPDLCUplink(const std::string& callsign, const CPDLCMessage
 	if (staged == nullptr) {
 		// No editor, which means no flight plan - the aircraft went away between the
 		// click and here. Say so rather than dropping the message silently.
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-			(callsign + ": no flight plan; cannot compose").c_str(), true, true, false, false, false);
+		const std::string msg = callsign + ": no flight plan; cannot compose";
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(), true, true, false, false, false);
+		SituLog::Warn("CPDLC", msg);
 		return;
 	}
 
@@ -2731,8 +2781,9 @@ void CSiTRadar::ComposeCPDLCPdc(const std::string& callsign)
 
 	CFlightPlan fp = GetPlugIn()->FlightPlanSelect(callsign.c_str());
 	if (!fp.IsValid()) {
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-			(callsign + ": no flight plan").c_str(), true, true, false, false, false);
+		const std::string msg = callsign + ": no flight plan";
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(), true, true, false, false, false);
+		SituLog::Warn("CPDLC", msg);
 		return;
 	}
 
@@ -2759,15 +2810,18 @@ void CSiTRadar::ComposeCPDLCPdc(const std::string& callsign)
 	const std::string identifier = uplink.MakePDCMessage(fp, me, atisLetter);
 
 	if (uplink.rawMessageContent.empty()) {
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-			(callsign + ": no departure clearance template matched " + fp.GetFlightPlanData().GetOrigin()).c_str(),
+		const std::string msg = callsign + ": no departure clearance template matched "
+			+ fp.GetFlightPlanData().GetOrigin();
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(),
 			true, true, false, false, false);
+		SituLog::Warn("CPDLC", msg);
 		return;
 	}
 
-	GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-		(callsign + ": clearance " + identifier + " ready to send").c_str(),
+	const std::string readyMsg = callsign + ": clearance " + identifier + " ready to send";
+	GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", readyMsg.c_str(),
 		true, true, false, false, false);
+	SituLog::Warn("CPDLC", readyMsg);
 
 	StageCPDLCUplink(callsign, uplink);
 }
@@ -2804,8 +2858,9 @@ void CSiTRadar::ComposeCPDLCUplink(const std::string& which, const std::string& 
 
 	CFlightPlan fp = GetPlugIn()->FlightPlanSelect(callsign.c_str());
 	if (!fp.IsValid()) {
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-			(callsign + ": no flight plan").c_str(), true, true, false, false, false);
+		const std::string msg = callsign + ": no flight plan";
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(), true, true, false, false, false);
+		SituLog::Warn("CPDLC", msg);
 		return;
 	}
 
@@ -2813,8 +2868,9 @@ void CSiTRadar::ComposeCPDLCUplink(const std::string& which, const std::string& 
 
 	// Refusals go through here so they read the same wherever they come from.
 	auto refuse = [&](const std::string& why) {
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-			(callsign + ": " + why).c_str(), true, true, false, false, false);
+		const std::string msg = callsign + ": " + why;
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(), true, true, false, false, false);
+		SituLog::Warn("CPDLC", msg);
 	};
 
 	if (which == "CPDLCNDA" || which == "CPDLCContact" || which == "CPDLCMonitor") {
@@ -3776,6 +3832,7 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
 						"No Hoppie logon code. Put it in situWx\\SituLocal.txt as HoppieCode=...",
 						true, true, false, false, false);
+					SituLog::Warn("CPDLC", "No Hoppie logon code. Put it in situWx\\SituLocal.txt as HoppieCode=...");
 					return;
 				}
 				if (CPDLCMessage::hoppieICAO.empty()) {
@@ -3783,6 +3840,7 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
 						"No station set. Enter one in the Setup panel, or HoppieICAO= in SituLocal.txt",
 						true, true, false, false, false);
+					SituLog::Warn("CPDLC", "No station set. Enter one in the Setup panel, or HoppieICAO= in SituLocal.txt");
 					return;
 				}
 

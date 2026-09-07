@@ -1,5 +1,8 @@
 #include "pch.h"
 #include "wxRadar.h"
+#include "SituLog.h"
+
+#include <chrono>
 
 cell wxRadar::wxReturn[256][256];
 string wxRadar::wxLatCtr = { "0.0" };
@@ -80,7 +83,9 @@ void wxRadar::loadPNG(std::vector<unsigned char>& buffer, const std::string& fil
 }
 
 void wxRadar::parseRadarPNG(CRadarScreen* rad) {
-    
+
+    const auto t0 = std::chrono::steady_clock::now();
+
     GetRainViewerJSON(rad);
 
     const std::string situWxDir = wxRadar::getSituWxDir();
@@ -98,9 +103,15 @@ void wxRadar::parseRadarPNG(CRadarScreen* rad) {
     // then report a parse error against the empty file. Say what actually happened
     // instead, and leave the previous tile on disk.
     if (!tile.ok) {
-        rad->GetPlugIn()->DisplayUserMessage("VATCAN Situ", "WX Parser",
-            ("Radar tile download failed - " + tile.error).c_str(),
+        SituLog::Line("NET", "rainviewer", SituLog::Fields().Add("ok", false)
+            .Add("tile", tileCacheurl).Add("error", tile.error)
+            .Add("ms", static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - t0).count())));
+
+        const std::string msg = "Radar tile download failed - " + tile.error;
+        rad->GetPlugIn()->DisplayUserMessage("VATCAN Situ", "WX Parser", msg.c_str(),
             true, false, false, false, false);
+        SituLog::Warn("WX Parser", msg);
         return;
     }
 
@@ -127,14 +138,31 @@ void wxRadar::parseRadarPNG(CRadarScreen* rad) {
     const size_t expectedBytes = 256u * 256u * 4u;
 
     if (error != 0) {
+        SituLog::Line("NET", "rainviewer", SituLog::Fields().Add("ok", false)
+            .Add("tile", tileCacheurl).Add("error", "PNG Failed to Parse")
+            .Add("ms", static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - t0).count())));
+
         rad->GetPlugIn()->DisplayUserMessage("VATCAN Situ", "WX Parser", string("PNG Failed to Parse").c_str(), true, false, false, false, false);
+        SituLog::Warn("WX Parser", "PNG Failed to Parse");
     }
     else if (w != 256ul || h != 256ul || image.size() < expectedBytes) {
-        rad->GetPlugIn()->DisplayUserMessage("VATCAN Situ", "WX Parser",
-            ("Unexpected radar tile size " + to_string(w) + "x" + to_string(h) + " - discarded").c_str(),
+        const std::string msg = "Unexpected radar tile size " + to_string(w) + "x" + to_string(h) + " - discarded";
+
+        SituLog::Line("NET", "rainviewer", SituLog::Fields().Add("ok", false)
+            .Add("tile", tileCacheurl).Add("error", msg)
+            .Add("ms", static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - t0).count())));
+
+        rad->GetPlugIn()->DisplayUserMessage("VATCAN Situ", "WX Parser", msg.c_str(),
             true, false, false, false, false);
+        SituLog::Warn("WX Parser", msg);
     }
     else {
+        SituLog::Line("NET", "rainviewer", SituLog::Fields().Add("ok", true)
+            .Add("tile", tileCacheurl).Add("bytes", static_cast<int>(tile.body.size()))
+            .Add("ms", static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - t0).count())));
 
         // convert vector into 2d array with dBa values only;
         // png starts as RGBARGBARGBA... etc. 
@@ -254,7 +282,10 @@ int wxRadar::renderRadar(Graphics* g, CRadarScreen* rad, bool showAllPrecip) {
 }
 
 void wxRadar::parseVatsimMetar(int i) {
-    
+
+    // Worker thread: SituLog only below - it takes its own mutex and never calls the SDK.
+    const auto t0 = std::chrono::steady_clock::now();
+
     CAsyncResponse response;
 
     const SituHttp::Response metar = SituHttp::Get("https://metar.vatsim.net/metar.php?id=c", 2500);
@@ -293,10 +324,34 @@ void wxRadar::parseVatsimMetar(int i) {
         wxRadar::PushAsyncMessage(response);
     }
 
+    const int airports = static_cast<int>(arptAltimeter.size());
+
     altimeterMutex.unlock();
+
+    SituLog::Line("NET", "metar", SituLog::Fields().Add("ok", metar.ok)
+        .Add("airports", airports).Add("error", metar.error)
+        .Add("ms", static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t0).count())));
 }
 
 void wxRadar::parseVatsimATIS(int i) {
+    // Worker thread: SituLog only below - it takes its own mutex and never calls the SDK.
+    const auto t0 = std::chrono::steady_clock::now();
+
+    // Milliseconds since t0, for the NET lines this function writes.
+    auto elapsedMs = [&t0]() {
+        return static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t0).count());
+    };
+
+    // One fetch feeds both the capability maps and the ATIS letters, so a failure is a
+    // failure of both - said under each subject so either one can be grepped alone.
+    auto logFailure = [&elapsedMs](const std::string& error) {
+        SituLog::Line("NET", "vatsim-feed", SituLog::Fields().Add("ok", false)
+            .Add("error", error).Add("ms", elapsedMs()));
+        SituLog::Line("NET", "atis", SituLog::Fields().Add("ok", false).Add("error", error));
+    };
+
     CAsyncResponse result;
 
     const SituHttp::Response status = SituHttp::Get("https://status.vatsim.net/status.json", 1500);
@@ -305,6 +360,7 @@ void wxRadar::parseVatsimATIS(int i) {
         result.responseCode = 1;
         // This message was built and then never pushed, so the failure was silent.
         PushAsyncMessage(result);
+        logFailure(result.reponseMessage);
         return;
     }
 
@@ -320,6 +376,7 @@ void wxRadar::parseVatsimATIS(int i) {
         result.reponseMessage = "VATSIM datafeed URL missing from status.json";
         result.responseCode = 1;
         PushAsyncMessage(result);
+        logFailure(result.reponseMessage);
         return;
     }
 
@@ -329,6 +386,7 @@ void wxRadar::parseVatsimATIS(int i) {
             + atis.error + ")";
         result.responseCode = 1;
         PushAsyncMessage(result);
+        logFailure(result.reponseMessage);
         return;
     }
 
@@ -342,6 +400,9 @@ void wxRadar::parseVatsimATIS(int i) {
         arptAtisLetter.clear();
     }
 
+
+    int pilots = 0;
+    int atisAirports = 0;
 
     try {
         wxRadar::jsVatsimDataFeed = json::parse(jsAtis.c_str());
@@ -370,6 +431,9 @@ void wxRadar::parseVatsimATIS(int i) {
                 }
             }
 
+            // Counted before the swap: newADSB is moved from by it.
+            pilots = static_cast<int>(newADSB.size());
+
             std::unique_lock<shared_mutex> capabilityLock(CSiTRadar::acCapabilityMutex);
             CSiTRadar::acADSB.swap(newADSB);
             CSiTRadar::acRVSM.swap(newRVSM);
@@ -385,9 +449,21 @@ void wxRadar::parseVatsimATIS(int i) {
                 }
             }
         }
+        atisAirports = static_cast<int>(arptAtisLetter.size());
         lock.unlock();
     }
-    catch (exception& e) { result.reponseMessage = e.what(); result.responseCode = 1; PushAsyncMessage(result); return; }
+    catch (exception& e) {
+        result.reponseMessage = e.what();
+        result.responseCode = 1;
+        PushAsyncMessage(result);
+        logFailure(result.reponseMessage);
+        return;
+    }
+
+    SituLog::Line("NET", "vatsim-feed", SituLog::Fields().Add("ok", true)
+        .Add("pilots", pilots).Add("ms", elapsedMs()));
+    SituLog::Line("NET", "atis", SituLog::Fields().Add("ok", true)
+        .Add("airports", atisAirports));
 
     return;
 }
