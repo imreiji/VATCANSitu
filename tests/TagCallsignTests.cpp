@@ -53,36 +53,47 @@ int main()
     }
 
     // --- The VF jurisdiction marker. A truth table rather than examples, because the
-    //     rule has four inputs and getting one wrong writes over a controller's id.
+    //     rule has five inputs and getting one wrong writes over a controller's id.
+    //
+    //     Arguments: correlated, VFR flight plan, squawk, tracking controller, field.
     {
-        // VFR flight plan, nobody tracking, field empty -> VF.
-        Check(ShowsVfrJurisdiction(true, "4321", "", ""), "VFR flight plan and unowned");
+        // Uncorrelated: only the conspicuity code says VFR. Nothing else does.
+        Check(ShowsVfrJurisdiction(false, false, "1200", "", ""), "uncorrelated on 1200");
+        Check(!ShowsVfrJurisdiction(false, false, "4321", "", ""), "uncorrelated on a discrete");
+        Check(!ShowsVfrJurisdiction(false, false, "2000", "", ""), "uncorrelated on 2000");
+        Check(!ShowsVfrJurisdiction(false, false, "", "", ""), "uncorrelated with no code");
 
-        // Squawking 1200 counts even without a VFR flight plan.
-        Check(ShowsVfrJurisdiction(false, "1200", "", ""), "1200 and unowned");
-        Check(ShowsVfrJurisdiction(true, "1200", "", ""), "both");
+        // Uncorrelated with a VFR flight plan filed under the callsign. The plan is not
+        // attached to this return, so it says nothing about it.
+        Check(!ShowsVfrJurisdiction(false, true, "4321", "", ""), "uncorrelated, VFR plan filed, discrete");
+        Check(!ShowsVfrJurisdiction(false, true, "", "", ""), "uncorrelated, VFR plan filed, no code");
+        Check(ShowsVfrJurisdiction(false, true, "1200", "", ""), "uncorrelated, VFR plan filed, on 1200 - the code decides");
 
-        // IFR on a discrete code is not VFR.
-        Check(!ShowsVfrJurisdiction(false, "4321", "", ""), "IFR on a discrete is not VFR");
-        Check(!ShowsVfrJurisdiction(false, "", "", ""), "no squawk at all is not VFR");
+        // Correlated: only the flight plan says VFR. The code no longer matters.
+        Check(ShowsVfrJurisdiction(true, true, "4321", "", ""), "correlated VFR plan on a discrete");
+        Check(ShowsVfrJurisdiction(true, true, "1200", "", ""), "correlated VFR plan on 1200");
+        Check(ShowsVfrJurisdiction(true, true, "", "", ""), "correlated VFR plan, no code read");
+        Check(!ShowsVfrJurisdiction(true, false, "4321", "", ""), "correlated IFR on a discrete");
+        Check(!ShowsVfrJurisdiction(true, false, "1200", "", ""), "correlated IFR on 1200 is still IFR");
 
         // Somebody is tracking it, so it is owned - never labelled unowned.
-        Check(!ShowsVfrJurisdiction(true, "1200", "QM", ""), "tracked by another controller");
-        Check(!ShowsVfrJurisdiction(true, "1200", "ZZ", ""), "tracked by anyone at all");
+        Check(!ShowsVfrJurisdiction(true, true, "1200", "QM", ""), "correlated, tracked by another controller");
+        Check(!ShowsVfrJurisdiction(false, false, "1200", "QM", ""), "uncorrelated on 1200 but tracked");
+        Check(!ShowsVfrJurisdiction(true, true, "4321", "ZZ", ""), "tracked by anyone at all");
 
         // The field already has something in it. A real position id always wins; this
         // rule only fills a blank.
-        Check(!ShowsVfrJurisdiction(true, "1200", "", "QM"), "never overwrites a handoff id");
-        Check(!ShowsVfrJurisdiction(true, "1200", "", "ZZ"), "nor any other id");
+        Check(!ShowsVfrJurisdiction(true, true, "1200", "", "QM"), "never overwrites a handoff id");
+        Check(!ShowsVfrJurisdiction(false, false, "1200", "", "ZZ"), "nor any other id");
 
         // Both guards at once, which is the case that would be worst to get wrong.
-        Check(!ShowsVfrJurisdiction(true, "1200", "QM", "ZZ"), "tracked and with an id shown");
+        Check(!ShowsVfrJurisdiction(true, true, "1200", "QM", "ZZ"), "tracked and with an id shown");
 
         // 1200 is matched exactly. A code that merely resembles it is not the
         // conspicuity code.
-        Check(!ShowsVfrJurisdiction(false, "12000", "", ""), "12000 is not 1200");
-        Check(!ShowsVfrJurisdiction(false, "0120", "", ""), "nor is 0120");
-        Check(!ShowsVfrJurisdiction(false, "1201", "", ""), "nor is 1201");
+        Check(!ShowsVfrJurisdiction(false, false, "12000", "", ""), "12000 is not 1200");
+        Check(!ShowsVfrJurisdiction(false, false, "0120", "", ""), "nor is 0120");
+        Check(!ShowsVfrJurisdiction(false, false, "1201", "", ""), "nor is 1201");
     }
 
     std::cout << "\n" << (g_checks - g_failures) << "/" << g_checks << " checks passed\n";

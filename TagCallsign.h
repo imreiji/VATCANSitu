@@ -38,8 +38,7 @@ namespace SituTag
         return transponderCode != assignedCode;
     }
 
-    // The VFR conspicuity code. An aircraft on it is announcing that it is VFR whatever
-    // the flight plan says, which is why it counts here alongside the flight plan flag.
+    // The VFR conspicuity code.
     const char* const kVfrSquawk = "1200";
 
     // What the jurisdiction field shows on the tag - normally a controller's position id.
@@ -48,12 +47,22 @@ namespace SituTag
     // empty and the tag gives no hint why. It shows "VF" instead: the aircraft is VFR and
     // unowned, which is a state rather than an absence.
     //
-    // Two guards, and both matter. It only fills a field that is already empty, so a real
-    // handoff or tracking id is never overwritten by this - if there is a controller to
-    // name, naming them wins. And it requires that nobody is tracking, so an aircraft
-    // being worked by someone else is never labelled unowned just because this scope has
-    // no handoff in progress with it.
-    inline bool ShowsVfrJurisdiction(bool hasVfrFlightPlan,
+    // What counts as VFR depends on whether the return is correlated, because the two
+    // cases have different evidence available:
+    //
+    //   - Uncorrelated: nothing ties a flight plan to this return, so only the code
+    //     speaks for it. 1200 says VFR; any other code, or no code, says nothing. A VFR
+    //     plan filed under the same callsign does not count - it is not attached.
+    //   - Correlated: the flight plan speaks for it, and only the flight plan. A VFR plan
+    //     is VFR whatever code is being squawked; an IFR plan is IFR even on 1200.
+    //
+    // Two guards on top, and both matter. It only fills a field that is already empty, so
+    // a real handoff or tracking id is never overwritten by this - if there is a
+    // controller to name, naming them wins. And it requires that nobody is tracking, so
+    // an aircraft being worked by someone else is never labelled unowned just because
+    // this scope has no handoff in progress with it.
+    inline bool ShowsVfrJurisdiction(bool isCorrelated,
+                                     bool hasVfrFlightPlan,
                                      const std::string& squawk,
                                      const std::string& trackingControllerId,
                                      const std::string& jurisdictionField)
@@ -61,6 +70,6 @@ namespace SituTag
         if (!jurisdictionField.empty()) { return false; }
         if (!trackingControllerId.empty()) { return false; }
 
-        return hasVfrFlightPlan || squawk == kVfrSquawk;
+        return isCorrelated ? hasVfrFlightPlan : (squawk == kVfrSquawk);
     }
 }
