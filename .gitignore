@@ -370,3 +370,6 @@ testbin/
 
 # Per-controller Hoppie credential; never shipped or committed.
 SituLocal.txt
+
+# subagent-driven-development scratch
+.superpowers/

@@ -101,7 +101,7 @@ int main()
                    "two plain fields");
 
         CheckEqual(FormatLine("02:15:58.412", "DRAW", "ACA123", Fields()),
-                   "02:15:58.412 DRAW ACA123     ",
+                   "02:15:58.412 DRAW ACA123      ",
                    "no fields still pads the subject");
 
         // Category is padded to 4, subject to 11, each followed by one space.
@@ -599,7 +599,7 @@ Fields SnapshotFields(const DrawSnapshot&);
     }
 ```
 
-Note the two spaces after `ACA123`: the subject is padded to 11 (`ACA123` plus five spaces) and then one separator space.
+Note the six spaces after `ACA123`: the subject is padded to 11 (`ACA123` plus five spaces) and then one separator space.
 
 - [ ] **Step 2: Run to verify it fails**
 
