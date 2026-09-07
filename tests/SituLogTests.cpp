@@ -111,6 +111,57 @@ int main()
         Check(ParseLogCommand("").action == LogAction::NotOurs, "empty");
     }
 
+    // --- Rotation. Given the names in the folder, which to delete so that after the new
+    //     file is created at most five exist. keep is the number of OLD files to keep (4).
+    {
+        Check(IsLogFileName("SituDebug-20260907-021558.log"), "canonical name matches");
+        Check(!IsLogFileName("settings.txt"), "settings not a log");
+        Check(!IsLogFileName("SituDebug-20260907-021558.log.bak"), "wrong suffix");
+        Check(!IsLogFileName("Debug-20260907.log"), "wrong prefix");
+        CheckEqual(LogFileName("20260907-021558"), "SituDebug-20260907-021558.log", "name built from stamp");
+
+        std::vector<std::string> none;
+        Check(RotationVictims(none, 4).empty(), "empty folder, nothing to delete");
+
+        std::vector<std::string> four = {
+            "SituDebug-20260901-000000.log", "SituDebug-20260902-000000.log",
+            "SituDebug-20260903-000000.log", "SituDebug-20260904-000000.log" };
+        Check(RotationVictims(four, 4).empty(), "four old files, all kept");
+
+        std::vector<std::string> five = four;
+        five.push_back("SituDebug-20260905-000000.log");
+        {
+            const std::vector<std::string> v = RotationVictims(five, 4);
+            Check(v.size() == 1 && v[0] == "SituDebug-20260901-000000.log", "five old files, oldest deleted");
+        }
+
+        // Order in the input does not matter; names sort by their timestamp. Nine files with
+        // four kept means the five oldest go, which here ends at the earlier of the two
+        // 20260906 files -- the later one survives, so same-day ordering is exercised.
+        std::vector<std::string> shuffled = {
+            "SituDebug-20260909-000000.log", "SituDebug-20260901-000000.log",
+            "SituDebug-20260903-000000.log", "SituDebug-20260902-000000.log",
+            "SituDebug-20260904-000000.log", "SituDebug-20260906-120000.log",
+            "SituDebug-20260906-110000.log", "SituDebug-20260907-000000.log",
+            "SituDebug-20260908-000000.log" };
+        {
+            const std::vector<std::string> v = RotationVictims(shuffled, 4);
+            Check(v.size() == 5, "nine old files, five deleted");
+            Check(v.size() == 5 && v[0] == "SituDebug-20260901-000000.log", "oldest first");
+            Check(v.size() == 5 && v[4] == "SituDebug-20260906-110000.log", "same day, earlier time deleted");
+        }
+
+        // Other files in the folder are never victims.
+        std::vector<std::string> mixed = five;
+        mixed.push_back("settings.txt");
+        mixed.push_back("SituLocal.txt");
+        mixed.push_back("0_0.png");
+        {
+            const std::vector<std::string> v = RotationVictims(mixed, 4);
+            Check(v.size() == 1 && v[0] == "SituDebug-20260901-000000.log", "non-log files untouched");
+        }
+    }
+
     std::cout << "\n" << (g_checks - g_failures) << "/" << g_checks << " checks passed\n";
     if (g_failures != 0) { std::cout << g_failures << " FAILURES\n"; return 1; }
     std::cout << "OK\n";

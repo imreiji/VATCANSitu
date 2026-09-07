@@ -166,4 +166,37 @@ namespace SituLog
         }
         return command;
     }
+
+    inline const char* const kLogPrefix = "SituDebug-";
+    inline const char* const kLogSuffix = ".log";
+
+    inline bool IsLogFileName(const std::string& name)
+    {
+        const std::string prefix = kLogPrefix;
+        const std::string suffix = kLogSuffix;
+        if (name.size() <= prefix.size() + suffix.size()) { return false; }
+        if (name.compare(0, prefix.size(), prefix) != 0) { return false; }
+        return name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0;
+    }
+
+    inline std::string LogFileName(const std::string& stamp)
+    {
+        return std::string(kLogPrefix) + stamp + kLogSuffix;
+    }
+
+    // Names sort lexically, and the stamp is zero-padded yyyymmdd-hhmmss, so lexical order
+    // is time order. Everything but the newest `keep` is a victim, oldest first.
+    inline std::vector<std::string> RotationVictims(std::vector<std::string> names, size_t keep)
+    {
+        std::vector<std::string> logs;
+        for (const std::string& name : names)
+        {
+            if (IsLogFileName(name)) { logs.push_back(name); }
+        }
+        std::sort(logs.begin(), logs.end());
+
+        if (logs.size() <= keep) { return {}; }
+        logs.resize(logs.size() - keep);
+        return logs;
+    }
 }
