@@ -162,6 +162,33 @@ int main()
         }
     }
 
+    // --- Draw snapshot. Equality is field-by-field; the fields list is the full state.
+    {
+        DrawSnapshot a;
+        a.flags = 6; a.corr = true; a.sqk = "4521"; a.trk = "QM"; a.tag = 1;
+        a.pps = "HEXAGON"; a.colour = "YELLOW"; a.tagfn = "ALPHA";
+
+        DrawSnapshot b = a;
+        Check(a == b, "copy is equal");
+        Check(!(a != b), "copy is not unequal");
+
+        b.sqk = "1200";
+        Check(a != b, "squawk change is a change");
+
+        b = a; b.pps = "ASTERISK";
+        Check(a != b, "shape change is a change");
+
+        b = a; b.vf = true;
+        Check(a != b, "vf change is a change");
+
+        b = a; b.flags = 7;
+        Check(a != b, "flags change is a change");
+
+        CheckEqual(FormatLine("00:00:00.000", "DRAW", "ACA123", SnapshotFields(a)),
+                   "00:00:00.000 DRAW ACA123      flags=6 corr=1 adsb=0 rvsm=0 vfr=0 sqk=4521 trk=QM tag=1 pps=HEXAGON colour=YELLOW vf=0 tagfn=ALPHA",
+                   "snapshot fields in the documented order");
+    }
+
     std::cout << "\n" << (g_checks - g_failures) << "/" << g_checks << " checks passed\n";
     if (g_failures != 0) { std::cout << g_failures << " FAILURES\n"; return 1; }
     std::cout << "OK\n";

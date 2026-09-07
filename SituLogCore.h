@@ -199,4 +199,39 @@ namespace SituLog
         logs.resize(logs.size() - keep);
         return logs;
     }
+
+    // The inputs the symbology depends on and the outputs it produced, for one aircraft on
+    // one frame. Logged only when it differs from the last one logged for that aircraft.
+    struct DrawSnapshot
+    {
+        int flags = 0;
+        bool corr = false;
+        bool adsb = false;
+        bool rvsm = false;
+        bool vfr = false;
+        std::string sqk;
+        std::string trk;
+        int tag = 0;
+        std::string pps;
+        std::string colour;
+        bool vf = false;
+        std::string tagfn;
+    };
+
+    inline bool operator==(const DrawSnapshot& a, const DrawSnapshot& b)
+    {
+        return a.flags == b.flags && a.corr == b.corr && a.adsb == b.adsb && a.rvsm == b.rvsm
+            && a.vfr == b.vfr && a.sqk == b.sqk && a.trk == b.trk && a.tag == b.tag
+            && a.pps == b.pps && a.colour == b.colour && a.vf == b.vf && a.tagfn == b.tagfn;
+    }
+
+    inline bool operator!=(const DrawSnapshot& a, const DrawSnapshot& b) { return !(a == b); }
+
+    inline Fields SnapshotFields(const DrawSnapshot& s)
+    {
+        return Fields()
+            .Add("flags", s.flags).Add("corr", s.corr).Add("adsb", s.adsb).Add("rvsm", s.rvsm)
+            .Add("vfr", s.vfr).Add("sqk", s.sqk).Add("trk", s.trk).Add("tag", s.tag)
+            .Add("pps", s.pps).Add("colour", s.colour).Add("vf", s.vf).Add("tagfn", s.tagfn);
+    }
 }
