@@ -27,6 +27,7 @@
 #include "SettingsFile.h"
 #include "SituFiles.h"
 #include "SituLegacy.h"
+#include "SituLog.h"
 #include "HaloTool.h"
 #include "constants.h"
 #include "TopMenu.h"

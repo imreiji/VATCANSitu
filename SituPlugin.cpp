@@ -730,6 +730,9 @@ inline void SituPlugin::OnFunctionCall(int FunctionId, const char* sItemString, 
     fp = FlightPlanSelectASEL();
     string spString = fp.GetControllerAssignedData().GetScratchPadString();
 
+    SituLog::Line("EVT", "TAG-FUNC", SituLog::Fields()
+        .Add("id", FunctionId).Add("item", sItemString).Add("callsign", fp.IsValid() ? fp.GetCallsign() : ""));
+
     if (FunctionId == TAG_FUNCTION_OPEN_CPDLC_WINDOW) {
 
         // Nothing to open a window against, and GetCallsign on an invalid plan has
@@ -796,6 +799,8 @@ inline void SituPlugin::OnFunctionCall(int FunctionId, const char* sItemString, 
 
 void SituPlugin::OnAirportRunwayActivityChanged()
 {
+    SituLog::Line("EVT", "RUNWAYS", SituLog::Fields());
+
     // DisplayActiveRunways() dereferences m_pRadScr too, so it belongs inside the guard.
     // ~CSiTRadar sets m_pRadScr back to nullptr, so this is reachable once the last ASR closes.
     if (CSiTRadar::m_pRadScr != nullptr) {
@@ -808,6 +813,8 @@ void SituPlugin::OnCompilePrivateChat(const char* sSenderCallsign,
     const char* sReceiverCallsign,
     const char* sChatMessage)
 {
+    SituLog::Line("EVT", "CHAT", SituLog::Fields()
+        .Add("from", sSenderCallsign).Add("len", static_cast<int>(strlen(sChatMessage))));
 
     string s, cs, msg;
     s = sChatMessage;

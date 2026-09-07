@@ -27,6 +27,65 @@ bool CSiTRadar::cpdlcPollInFlight = false;
 int CSiTRadar::cpdlcConsecutiveFailures = 0;
 std::string CSiTRadar::cpdlcLastReportedError;
 
+namespace
+{
+	// Names for the CTR_DATA_TYPE_* constants, for the CTR-DATA log line.
+	const char* CtrDataTypeName(int type)
+	{
+		switch (type)
+		{
+		case CTR_DATA_TYPE_SQUAWK:              return "SQUAWK";
+		case CTR_DATA_TYPE_FINAL_ALTITUDE:      return "FINAL_ALTITUDE";
+		case CTR_DATA_TYPE_TEMPORARY_ALTITUDE:  return "TEMPORARY_ALTITUDE";
+		case CTR_DATA_TYPE_COMMUNICATION_TYPE:  return "COMMUNICATION_TYPE";
+		case CTR_DATA_TYPE_SCRATCH_PAD_STRING:  return "SCRATCH_PAD_STRING";
+		case CTR_DATA_TYPE_GROUND_STATE:        return "GROUND_STATE";
+		case CTR_DATA_TYPE_CLEARENCE_FLAG:      return "CLEARANCE_FLAG";
+		case CTR_DATA_TYPE_DEPARTURE_SEQUENCE:  return "DEPARTURE_SEQUENCE";
+		case CTR_DATA_TYPE_SPEED:               return "SPEED";
+		case CTR_DATA_TYPE_MACH:                return "MACH";
+		case CTR_DATA_TYPE_RATE:                return "RATE";
+		case CTR_DATA_TYPE_HEADING:             return "HEADING";
+		case CTR_DATA_TYPE_DIRECT_TO:           return "DIRECT_TO";
+		default:                                return "OTHER";
+		}
+	}
+
+	// The value the CTR_DATA type names, read back from the flight plan. The types with no
+	// accessor on CFlightPlanControllerAssignedData - ground state, the clearance flag and
+	// the departure sequence - fall through to the empty string; the type name still says
+	// which update arrived.
+	std::string CtrDataValue(CFlightPlan& fp, int type)
+	{
+		CFlightPlanControllerAssignedData d = fp.GetControllerAssignedData();
+		switch (type)
+		{
+		case CTR_DATA_TYPE_SQUAWK:              return d.GetSquawk();
+		case CTR_DATA_TYPE_FINAL_ALTITUDE:      return std::to_string(d.GetFinalAltitude());
+		case CTR_DATA_TYPE_TEMPORARY_ALTITUDE:  return std::to_string(d.GetClearedAltitude());
+		case CTR_DATA_TYPE_COMMUNICATION_TYPE:  return std::string(1, d.GetCommunicationType());
+		case CTR_DATA_TYPE_SCRATCH_PAD_STRING:  return d.GetScratchPadString();
+		case CTR_DATA_TYPE_SPEED:               return std::to_string(d.GetAssignedSpeed());
+		case CTR_DATA_TYPE_MACH:                return std::to_string(d.GetAssignedMach());
+		case CTR_DATA_TYPE_RATE:                return std::to_string(d.GetAssignedRate());
+		case CTR_DATA_TYPE_HEADING:             return std::to_string(d.GetAssignedHeading());
+		case CTR_DATA_TYPE_DIRECT_TO:           return d.GetDirectToPointName();
+		default:                                return "";
+		}
+	}
+
+	const char* ButtonName(int button)
+	{
+		switch (button)
+		{
+		case BUTTON_LEFT:   return "L";
+		case BUTTON_MIDDLE: return "M";
+		case BUTTON_RIGHT:  return "R";
+		default:            return "?";
+		}
+	}
+}
+
 void CSiTRadar::StartCPDLCPoll()
 {
 	{
@@ -2911,6 +2970,8 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 	RECT Area,
 	int Button)
 {
+	SituLog::Line("EVT", "CLICK", SituLog::Fields()
+		.Add("type", ObjectType).Add("id", sObjectId).Add("button", ButtonName(Button)));
 
 	menuState.bgM3Click = false;
 
@@ -3394,7 +3455,9 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 	POINT Pt,
 	RECT Area,
 	int Button)
-{	
+{
+	SituLog::Line("EVT", "BTN-DOWN", SituLog::Fields()
+		.Add("type", ObjectType).Add("id", sObjectId).Add("button", ButtonName(Button)));
 
 	if (menuState.mouseMMB) { return; }
 
@@ -4143,7 +4206,12 @@ void CSiTRadar::OnOverScreenObject(int ObjectType,
 }
 
 void CSiTRadar::OnMoveScreenObject(int ObjectType, const char* sObjectId, POINT Pt, RECT Area, bool Released) {
-	
+
+	// Only the drop, not every pixel of the drag.
+	if (Released) {
+		SituLog::Line("EVT", "MOVE", SituLog::Fields().Add("type", ObjectType).Add("id", sObjectId));
+	}
+
 	// Handling moving of the tags rendered by the plugin
 	CRadarTarget rt = GetPlugIn()->RadarTargetSelect(sObjectId);
 	CFlightPlan fp = GetPlugIn()->FlightPlanSelect(sObjectId);
@@ -4278,6 +4346,10 @@ void CSiTRadar::OnFunctionCall(int FunctionId,
 	POINT Pt,
 	RECT Area) {
 
+	SituLog::Line("EVT", "TAG-FUNC", SituLog::Fields()
+		.Add("id", FunctionId).Add("item", sItemString)
+		.Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign()));
+
 	if (FunctionId == FUNCTION_ALT_FILT_LOW) {
 		try {
 			altFilterLow = stoi(sItemString);
@@ -4362,6 +4434,9 @@ void CSiTRadar::updateActiveRunways(int i) {
 				arrival.magneticDesignator = atoi(arrival.name.c_str()) * 10;
 
 				menuState.activeArrivalRunways.push_back(arrival);
+
+				SituLog::Line("NET", "RUNWAYS", SituLog::Fields()
+					.Add("airport", arrival.airport).Add("rwy", arrival.name).Add("course", arrival.trueCourse));
 			}
 		}
 	}
@@ -4500,10 +4575,23 @@ void CSiTRadar::OnAsrContentLoaded(bool Loaded) {
 
 	}
 	//
-} 
+
+	// At the end, so the altitude filters logged are the ones this ASR just loaded.
+	SituLog::Line("EVT", "ASR-LOAD", SituLog::Fields()
+		.Add("loaded", Loaded)
+		.Add("display", GetDataFromAsr("DisplayTypeName") != NULL ? GetDataFromAsr("DisplayTypeName") : "")
+		.Add("altlow", altFilterLow).Add("althigh", altFilterHigh));
+}
 
 void CSiTRadar::OnFlightPlanFlightPlanDataUpdate(CFlightPlan FlightPlan)
 {
+	SituLog::Line("EVT", "FP-DATA", SituLog::Fields()
+		.Add("callsign", FlightPlan.GetCallsign())
+		.Add("rule", FlightPlan.GetFlightPlanData().GetPlanType())
+		.Add("wtc", std::string(1, FlightPlan.GetFlightPlanData().GetAircraftWtc()))
+		.Add("capab", std::string(1, FlightPlan.GetFlightPlanData().GetCapibilities()))
+		.Add("rmk", SituLog::Truncate(FlightPlan.GetFlightPlanData().GetRemarks(), 60))
+		.Add("route", SituLog::Truncate(FlightPlan.GetFlightPlanData().GetRoute(), 60)));
 
 	int count = 0;
 	CSiTRadar::menuState.jurisdictionalAC.clear();
@@ -4609,6 +4697,11 @@ void CSiTRadar::OnFlightPlanFlightPlanDataUpdate(CFlightPlan FlightPlan)
 void CSiTRadar::OnFlightPlanControllerAssignedDataUpdate(CFlightPlan FlightPlan,
 	int DataType) {
 
+	SituLog::Line("EVT", "CTR-DATA", SituLog::Fields()
+		.Add("callsign", FlightPlan.GetCallsign())
+		.Add("type", CtrDataTypeName(DataType))
+		.Add("value", CtrDataValue(FlightPlan, DataType)));
+
 	// update the menustate.squawkcodes only if the planes data gets changed
 
 	if (DataType == CTR_DATA_TYPE_SQUAWK) {
@@ -4660,6 +4753,8 @@ void CSiTRadar::OnFlightPlanControllerAssignedDataUpdate(CFlightPlan FlightPlan,
 }
 
 void CSiTRadar::OnFlightPlanDisconnect(CFlightPlan FlightPlan) {
+	SituLog::Line("EVT", "FP-GONE", SituLog::Fields().Add("callsign", FlightPlan.GetCallsign()));
+
 	string callSign = FlightPlan.GetCallsign();
 
 	// Ten maps are keyed by callsign; only mAcData was cleaned here. The rest grew for the
@@ -4971,15 +5066,29 @@ void CSiTRadar::DrawACList(POINT p, CDC* dc, unordered_map<string, ACData>& ac, 
 
 void CSiTRadar::OnDoubleClickScreenObject(int ObjectType, const char* sObjectId, POINT Pt, RECT Area, int Button)
 {
-	
+	SituLog::Line("EVT", "DBLCLICK", SituLog::Fields().Add("type", ObjectType).Add("id", sObjectId));
 }
 
 void CSiTRadar::OnAsrContentToBeSaved() {
-
+	SituLog::Line("EVT", "ASR-SAVE", SituLog::Fields());
 }
 
 void CSiTRadar::OnControllerPositionUpdate(CController Controller)
 {
+	// This fires every few seconds for every controller online. Log first sight and any
+	// change of position id or frequency, nothing else.
+	{
+		static std::map<std::string, std::string> seen;   // callsign -> "id freq"
+		const std::string key = Controller.GetCallsign();
+		const std::string value = std::string(Controller.GetPositionId()) + " " + std::to_string(Controller.GetPrimaryFrequency());
+		if (seen[key] != value) {
+			seen[key] = value;
+			SituLog::Line("EVT", "CTRL", SituLog::Fields()
+				.Add("callsign", key).Add("id", Controller.GetPositionId())
+				.Add("freq", Controller.GetPrimaryFrequency()));
+		}
+	}
+
 	/*std::once_flag flag1;
 
 	std::call_once(flag1, [&]() {
@@ -5014,6 +5123,9 @@ void CSiTRadar::OnControllerPositionUpdate(CController Controller)
 }
 
 void CSiTRadar::OnControllerDisconnect(CController Controller) {
+	SituLog::Line("EVT", "CTRL-GONE", SituLog::Fields()
+		.Add("id", Controller.GetPositionId()).Add("callsign", Controller.GetCallsign()));
+
 	if (CSiTRadar::menuState.nearbyCJS.find(Controller.GetPositionId()) != CSiTRadar::menuState.nearbyCJS.end()) {
 		CSiTRadar::menuState.nearbyCJS.erase(Controller.GetPositionId());
 	}
@@ -5022,6 +5134,9 @@ void CSiTRadar::OnControllerDisconnect(CController Controller) {
 void CSiTRadar::OnFlightPlanFlightStripPushed(CFlightPlan FlightPlan,
 	const char* sSenderController,
 	const char* sTargetController) {
+
+	SituLog::Line("EVT", "STRIP", SituLog::Fields()
+		.Add("callsign", FlightPlan.GetCallsign()).Add("from", sSenderController).Add("to", sTargetController));
 
 	string poString = FlightPlan.GetControllerAssignedData().GetFlightStripAnnotation(0);
 
