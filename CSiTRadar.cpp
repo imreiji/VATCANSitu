@@ -786,7 +786,8 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 					if (radarTarget.GetPosition().GetTransponderI() == TRUE && halfSecTick) { ppsColor = C_WHITE; }
 
-					RECT prect = CPPS::DrawPPS(&dc, isCorrelated, isVFR, isADSB, isRVSM, radarTarget.GetPosition().GetRadarFlags(), ppsColor, radarTarget.GetPosition().GetSquawk(), p);
+					const char* ppsShape = "NONE";
+					RECT prect = CPPS::DrawPPS(&dc, isCorrelated, isVFR, isADSB, isRVSM, radarTarget.GetPosition().GetRadarFlags(), ppsColor, radarTarget.GetPosition().GetSquawk(), p, &ppsShape);
 					AddScreenObject(AIRCRAFT_SYMBOL, callSign.c_str(), prect, FALSE, "");
 
 					// display CJS
@@ -827,8 +828,30 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 					}
 
+					const char* tagForm = "NONE";
 					if (radarTarget.GetPosition().GetRadarFlags() != 0) {
-						CACTag::DrawNARDSTag(&dc, this, &radarTarget, &radarTarget.GetCorrelatedFlightPlan(), &rtagOffset);
+						tagForm = CACTag::DrawNARDSTag(&dc, this, &radarTarget, &radarTarget.GetCorrelatedFlightPlan(), &rtagOffset);
+					}
+
+					// What this frame put on screen for this aircraft, logged only when it
+					// differs from the last line logged. IsFollowed is the whole per-target
+					// cost when nothing is followed.
+					if (SituLog::IsFollowed(callSign)) {
+						SituLog::DrawSnapshot snap;
+						snap.flags = radarTarget.GetPosition().GetRadarFlags();
+						snap.corr = isCorrelated;
+						snap.adsb = isADSB;
+						snap.rvsm = isRVSM;
+						snap.vfr = isVFR;
+						snap.sqk = radarTarget.GetPosition().GetSquawk();
+						snap.trk = GetPlugIn()->FlightPlanSelect(callSign.c_str()).GetTrackingControllerId();
+						snap.tag = mAcData[callSign].tagType;
+						snap.pps = ppsShape;
+						snap.colour = ppsColor == C_PPS_YELLOW ? "YELLOW" : ppsColor == C_PPS_ORANGE ? "ORANGE"
+							: ppsColor == C_PPS_MAGENTA ? "MAGENTA" : ppsColor == C_PPS_RED ? "RED" : "WHITE";
+						snap.vf = vfMarker;
+						snap.tagfn = tagForm;
+						SituLog::Draw(callSign, snap);
 					}
 				}
 
@@ -1169,17 +1192,19 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 					if (radarTarget.GetPosition().GetTransponderI() == TRUE && halfSecTick) { ppsColor = C_WHITE; }
 
-					RECT prect = CPPS::DrawPPS(&dc, isCorrelated, isVFR, isADSB, isRVSM, radarTarget.GetPosition().GetRadarFlags(), ppsColor, radarTarget.GetPosition().GetSquawk(), p);
+					const char* ppsShape = "NONE";
+					RECT prect = CPPS::DrawPPS(&dc, isCorrelated, isVFR, isADSB, isRVSM, radarTarget.GetPosition().GetRadarFlags(), ppsColor, radarTarget.GetPosition().GetSquawk(), p, &ppsShape);
 					AddScreenObject(AIRCRAFT_SYMBOL, callSign.c_str(), prect, FALSE, "");
 
+					const char* tagForm = "NONE";
 					if (radarTarget.GetPosition().GetRadarFlags() != 0 && radarTarget.GetPosition().GetRadarFlags() !=4) {
-						CACTag::DrawRTACTag(&dc, this, &radarTarget, &radarTarget.GetCorrelatedFlightPlan(), &rtagOffset);
+						tagForm = CACTag::DrawRTACTag(&dc, this, &radarTarget, &radarTarget.GetCorrelatedFlightPlan(), &rtagOffset);
 						if (radarTarget.GetGS() > 10) {
 							CACTag::DrawHistoryDots(&dc, &radarTarget);
 						}
 					}
 					else if (radarTarget.GetPosition().GetRadarFlags() == 4 && isADSB) {
-						CACTag::DrawRTACTag(&dc, this, &radarTarget, &radarTarget.GetCorrelatedFlightPlan(), &rtagOffset);
+						tagForm = CACTag::DrawRTACTag(&dc, this, &radarTarget, &radarTarget.GetCorrelatedFlightPlan(), &rtagOffset);
 						if (radarTarget.GetGS() > 10) {
 							CACTag::DrawHistoryDots(&dc, &radarTarget);
 						}
@@ -1322,6 +1347,27 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 							dc.SetTextColor(cjsColor);
 						}
+					}
+
+					// What this frame put on screen for this aircraft, logged only when it
+					// differs from the last line logged. IsFollowed is the whole per-target
+					// cost when nothing is followed.
+					if (SituLog::IsFollowed(callSign)) {
+						SituLog::DrawSnapshot snap;
+						snap.flags = radarTarget.GetPosition().GetRadarFlags();
+						snap.corr = isCorrelated;
+						snap.adsb = isADSB;
+						snap.rvsm = isRVSM;
+						snap.vfr = isVFR;
+						snap.sqk = radarTarget.GetPosition().GetSquawk();
+						snap.trk = GetPlugIn()->FlightPlanSelect(callSign.c_str()).GetTrackingControllerId();
+						snap.tag = mAcData[callSign].tagType;
+						snap.pps = ppsShape;
+						snap.colour = ppsColor == C_PPS_YELLOW ? "YELLOW" : ppsColor == C_PPS_ORANGE ? "ORANGE"
+							: ppsColor == C_PPS_MAGENTA ? "MAGENTA" : ppsColor == C_PPS_RED ? "RED" : "WHITE";
+						snap.vf = vfMarker;
+						snap.tagfn = tagForm;
+						SituLog::Draw(callSign, snap);
 					}
 
 					// plane halo looks at the <map> hashalo to see if callsign has a halo, if so, draws halo

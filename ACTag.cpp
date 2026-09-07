@@ -212,7 +212,7 @@ void CACTag::DrawFPACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 
 // Draws tag for Radar Targets
 
-void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPlan *fp, unordered_map<string, POINT> *tOffset)
+const char *CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPlan *fp, unordered_map<string, POINT> *tOffset)
 {
 
 	POINT p{0, 0};
@@ -451,9 +451,15 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 
 	RECT rline1; // bring scope out to allow connector to be drawn
 
+	// Which of the mutually exclusive tag bodies below actually drew, reported to the
+	// caller for the SituDebug DRAW line.
+	const char *form = "NONE";
+
 	if (CSiTRadar::mAcData[rt->GetCallsign()].tagType == 1 ||
 		(CSiTRadar::mAcData[fp->GetCallsign()].isADSB && CSiTRadar::mAcData[fp->GetCallsign()].tagType == 1))
 	{
+		form = "ALPHA";
+
 		// Tag formatting
 		RECT tagCallsign;
 		tagCallsign.left = p.x + tagOffsetX;
@@ -1026,6 +1032,7 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 	// BRAVO TAGS
 	if (CSiTRadar::mAcData[rt->GetCallsign()].tagType == 0 && rt->GetPosition().GetRadarFlags() != 1)
 	{
+		form = "BRAVO";
 
 		RECT bline0{};
 		RECT bline1{};
@@ -1092,6 +1099,8 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 		// grows an empty row nor shifts.
 		const bool adsbIdentity = CSiTRadar::mAcData[rt->GetCallsign()].isADSB;
 
+		form = adsbIdentity ? "UNCORR-ADSB" : "UNCORR";
+
 		uline0.top = p.y - 19;
 		uline0.left = p.x + 10;
 		if (CSiTRadar::halfSecTick && CSiTRadar::mAcData[rt->GetCallsign()].multipleDiscrete)
@@ -1136,9 +1145,11 @@ void CACTag::DrawRTACTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPl
 
 	// restore context
 	dc->RestoreDC(sDC);
+
+	return form;
 }
 
-void CACTag::DrawNARDSTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPlan *fp, unordered_map<string, POINT> *tOffset)
+const char *CACTag::DrawNARDSTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPlan *fp, unordered_map<string, POINT> *tOffset)
 {
 
 	POINT p{0, 0};
@@ -1364,9 +1375,14 @@ void CACTag::DrawNARDSTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightP
 
 	// Draw Connector Ends
 
+	// Which tag body drew, reported to the caller for the SituDebug DRAW line.
+	const char *form = "NONE";
+
 	if (CSiTRadar::mAcData[rt->GetCallsign()].tagType == 1 ||
 		(CSiTRadar::mAcData[fp->GetCallsign()].isADSB && CSiTRadar::mAcData[fp->GetCallsign()].tagType == 1))
 	{
+		form = "NARDS";
+
 		// Tag formatting
 		RECT tagCallsign;
 		tagCallsign.left = p.x + tagOffsetX;
@@ -1494,6 +1510,8 @@ void CACTag::DrawNARDSTag(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightP
 
 	// restore context
 	dc->RestoreDC(sDC);
+
+	return form;
 }
 
 void CACTag::DrawFPConnector(CDC *dc, CRadarScreen *rad, CRadarTarget *rt, CFlightPlan *fp, COLORREF color, unordered_map<string, POINT> *tOffset)
