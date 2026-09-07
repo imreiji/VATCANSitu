@@ -93,6 +93,22 @@ https://vimeo.com/443838489
 
 Not implemented for now: There are some sham buttons just to replicate the UI (also I don't know what some of them do in the real system). RBL default ES tools work well, unlikely will be a priority.
 
+# Debug log
+
+Type in the EuroScope command line:
+
+    .situ log on          start writing situWx\SituDebug-<date>-<time>.log beside the DLL
+    .situ log ACA123      also log every change in what is drawn for that aircraft
+    .situ log all         same for every aircraft (heavy)
+    .situ log none        stop following aircraft, keep logging
+    .situ log status      where the file is and how many lines
+    .situ log off         stop
+
+The log records every event from EuroScope (EVT), every change the plugin makes (ES>),
+file and network loads (NET), draw decisions for followed aircraft (DRAW) and anything the
+plugin refused or caught (WARN). Grep by the category column or by callsign. The five newest
+logs are kept. Off until asked for.
+
 # Installation
 The dll was compiled using Visual Studio 2019 (v142) using MFC libraries. The source code is provided to allow you to review and compile yourself.
 
