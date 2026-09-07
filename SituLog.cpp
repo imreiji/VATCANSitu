@@ -104,9 +104,14 @@ namespace SituLog
 
         g_enabled = true;
         g_lines = 0;
+        // A new file starts with a full baseline for every followed aircraft.
+        g_lastSnapshot.clear();
         WriteLocked(FormatLine(NowForLine(), "CMD", "log", Fields().Add("opened", g_path)));
 
-        result.ok = true;
+        // WriteLocked turns the log off again if that first line did not reach the disk, so
+        // g_enabled - not the open succeeding - is what the caller is being told about.
+        result.ok = g_enabled;
+        if (!result.ok) { result.error = "could not write to " + g_path; }
         result.path = g_path;
         return result;
     }
