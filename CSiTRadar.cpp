@@ -217,7 +217,9 @@ CSiTRadar::CSiTRadar()
 		}
 
 		// TBS configuration, read once. A missing file leaves no airports configured,
-		// which turns the marker off rather than breaking anything.
+		// which turns the marker off rather than breaking anything - but it has to say
+		// so. It did not, and the first symptom of the file being one folder too high
+		// was "TBS stopped drawing", with nothing in the chat area to point at the cause.
 		{
 			const std::string tbsPath = wxRadar::getSituWxDir() + "SituTBS.txt";
 			std::ifstream tbsFile(tbsPath.c_str(), std::ios::binary);
@@ -235,6 +237,21 @@ CSiTRadar::CSiTRadar()
 						("SituTBS.txt: " + std::to_string(bad) + " line(s) not understood and ignored").c_str(),
 						true, true, false, false, false);
 				}
+
+				// An empty airport list is the same outcome as no file, and just as quiet
+				// without this.
+				if (tbsConfig.airports.empty()) {
+					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "TBS",
+						"SituTBS.txt names no airports; TBS markers are off",
+						true, true, false, false, false);
+				}
+			}
+			else {
+				// The full path, because the folder is resolved from the DLL and the
+				// obvious guess - beside the DLL, or beside EuroScope.exe - is wrong.
+				GetPlugIn()->DisplayUserMessage("VATCAN Situ", "TBS",
+					("SituTBS.txt not found at " + tbsPath + "; TBS markers are off").c_str(),
+					true, true, false, false, false);
 			}
 		}
 
@@ -260,6 +277,11 @@ CSiTRadar::CSiTRadar()
 							+ " is claimed by more than one station; the callsign prefix decides").c_str(),
 						true, true, false, false, false);
 				}
+			}
+			else {
+				GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
+					("SituCPDLC.txt not found at " + cpdlcPath + "; no CPDLC stations are known").c_str(),
+					true, true, false, false, false);
 			}
 		}
 
