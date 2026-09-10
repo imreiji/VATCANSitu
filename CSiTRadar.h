@@ -515,6 +515,8 @@ public:
     bool SubmitAltitudeWindow(int windowId);
     // Flips the CPDLC toggle and recolours its button.
     void ToggleAltitudeCpdlc(CAppWindows& window);
+    // Closes every open Alt window without applying, and drops keyboard focus if it was there.
+    void CloseAltitudeWindows();
 
 protected:
     void ButtonToScreen(CSiTRadar* radscr, const RECT& rect, const string& btext, int itemtype);

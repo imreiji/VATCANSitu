@@ -1011,6 +1011,18 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 				// every list reachable if the radar area has shrunk since it was placed.
 				ResolveListOffsets(radarea);
 
+				// While an Alt window is open the bare scope is a click target, so a click
+				// away from the window can close it. Registered before anything else in
+				// the frame: EuroScope gives later registrations priority, so every tag,
+				// list, menu and window drawn after this still takes its own clicks and
+				// only a click that hits nothing else lands here.
+				for (const auto& win : menuState.radarScrWindows) {
+					if (win.second.m_winType == WINDOW_ALTITUDE) {
+						AddScreenObject(SCREEN_BACKGROUND, "alt", radarea, false, "");
+						break;
+					}
+				}
+
 				DrawACList(ListOrigin(acLists[LIST_TIME_ATIS], radarea), &dc, mAcData, LIST_TIME_ATIS);
 				DrawACList(ListOrigin(acLists[LIST_OFF_SCREEN], radarea), &dc, mAcData, LIST_OFF_SCREEN);
 				DrawACList(ListOrigin(acLists[LIST_MESSAGES], radarea), &dc, mAcData, LIST_MESSAGES);
@@ -2820,18 +2832,14 @@ void CSiTRadar::OpenAltitudeWindow(CFlightPlan fp, POINT at)
 	// One on the scope at a time. A request for the same aircraft moves the open window
 	// to the mouse; a request for a different aircraft closes the open one first, so two
 	// clearances are never in flight side by side.
-	for (auto it = menuState.radarScrWindows.begin(); it != menuState.radarScrWindows.end(); ) {
-		if (it->second.m_winType != WINDOW_ALTITUDE) { ++it; continue; }
-		if (it->second.m_callsign == callsign) {
-			it->second.m_origin = at;
+	for (auto& win : menuState.radarScrWindows) {
+		if (win.second.m_winType == WINDOW_ALTITUDE && win.second.m_callsign == callsign) {
+			win.second.m_origin = at;
 			RequestRefresh();
 			return;
 		}
-		if (menuState.focusedItem.m_window_id == it->second.m_windowId_) {
-			menuState.focusedItem.m_focus_on = false;
-		}
-		it = menuState.radarScrWindows.erase(it);
 	}
+	CloseAltitudeWindows();
 
 	CAppWindows alt(at, WINDOW_ALTITUDE, fp, GetRadarArea());
 
@@ -2850,6 +2858,17 @@ void CSiTRadar::OpenAltitudeWindow(CFlightPlan fp, POINT at)
 		SetFocusedTextField(placed.m_windowId_, placed.m_textfields_.front().m_textFieldID);
 	}
 	RequestRefresh();
+}
+
+void CSiTRadar::CloseAltitudeWindows()
+{
+	for (auto it = menuState.radarScrWindows.begin(); it != menuState.radarScrWindows.end(); ) {
+		if (it->second.m_winType != WINDOW_ALTITUDE) { ++it; continue; }
+		if (menuState.focusedItem.m_window_id == it->second.m_windowId_) {
+			menuState.focusedItem.m_focus_on = false;
+		}
+		it = menuState.radarScrWindows.erase(it);
+	}
 }
 
 void CSiTRadar::ToggleAltitudeCpdlc(CAppWindows& window)
@@ -3491,6 +3510,14 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 		if (!strcmp(func.c_str(), "Cancel")) {
 			menuState.radarScrWindows.erase(stoi(id));
 		}
+	}
+
+	if (ObjectType == SCREEN_BACKGROUND) {
+		// Only registered while an Alt window is open; a click on empty scope closes it
+		// without applying, the same as Escape.
+		CloseAltitudeWindows();
+		RequestRefresh();
+		return;
 	}
 
 	if (ObjectType == WINDOW_ALTITUDE) {
