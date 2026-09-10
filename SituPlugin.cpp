@@ -4,6 +4,8 @@
 #include "constants.h"
 #include "ACTag.h"
 #include "CFontHelper.h"
+#include "wxRadar.h"
+#include "SituLog.h"
 
 const int TAG_ITEM_IFR_REL = 5000;
 const int TAG_FUNC_IFR_REL_REQ = 5001;
@@ -179,9 +181,12 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             if (wParam == VK_RETURN) {
                 if (parentWin->m_winType == WINDOW_HANDOFF_EXT_CJS) {
 
+                    const string toCallsign =
+                        CSiTRadar::m_pRadScr->GetPlugIn()->ControllerSelectByPositionId(focusedField->m_text.c_str()).GetCallsign();
                     CSiTRadar::m_pRadScr->GetPlugIn()->FlightPlanSelect(parentWin->m_callsign.c_str()).InitiateHandoff(
-                        CSiTRadar::m_pRadScr->GetPlugIn()->ControllerSelectByPositionId(focusedField->m_text.c_str()).GetCallsign()
+                        toCallsign.c_str()
                     );
+                    SituLog::Line("ES>", "HANDOFF", SituLog::Fields().Add("callsign", parentWin->m_callsign).Add("to", focusedField->m_text).Add("to_cs", toCallsign).Add("via", "typed"));
                     // Closing the window destroys parentWin and focusedField - nothing
                     // below may touch them.
                     CSiTRadar::CloseWindow(parentWin->m_windowId_);
@@ -728,6 +733,10 @@ inline void SituPlugin::OnFunctionCall(int FunctionId, const char* sItemString, 
     fp = FlightPlanSelectASEL();
     string spString = fp.GetControllerAssignedData().GetScratchPadString();
 
+    SituLog::Line("EVT", "TAG-FUNC", SituLog::Fields()
+        .Add("id", FunctionId).Add("item", sItemString).Add("callsign", fp.IsValid() ? fp.GetCallsign() : "")
+        .Add("where", "plugin"));
+
     if (FunctionId == TAG_FUNCTION_OPEN_CPDLC_WINDOW) {
 
         // Nothing to open a window against, and GetCallsign on an invalid plan has
@@ -775,8 +784,9 @@ inline void SituPlugin::OnFunctionCall(int FunctionId, const char* sItemString, 
             ? ReleaseState::Requested
             : ReleaseState::None;
 
-        fp.GetControllerAssignedData().SetScratchPadString(
-            ScratchpadWithRelease(spString, next).c_str());
+        const string newSpString = ScratchpadWithRelease(spString, next);
+        fp.GetControllerAssignedData().SetScratchPadString(newSpString.c_str());
+        SituLog::Line("ES>", "SCRATCHPAD", SituLog::Fields().Add("callsign", fp.GetCallsign()).Add("was", spString).Add("now", newSpString).Add("via", "ifr-release"));
     }
 
     if (FunctionId == TAG_FUNC_IFR_RELEASED) {
@@ -785,8 +795,9 @@ inline void SituPlugin::OnFunctionCall(int FunctionId, const char* sItemString, 
         if (ControllerMyself().GetFacility() >= 5) {
 
             if (ParseScratchpad(spString).release == ReleaseState::Requested) {
-                fp.GetControllerAssignedData().SetScratchPadString(
-                    ScratchpadWithRelease(spString, ReleaseState::Granted).c_str());
+                const string newSpString = ScratchpadWithRelease(spString, ReleaseState::Granted);
+                fp.GetControllerAssignedData().SetScratchPadString(newSpString.c_str());
+                SituLog::Line("ES>", "SCRATCHPAD", SituLog::Fields().Add("callsign", fp.GetCallsign()).Add("was", spString).Add("now", newSpString).Add("via", "ifr-release"));
             }
         }
     }
@@ -794,6 +805,8 @@ inline void SituPlugin::OnFunctionCall(int FunctionId, const char* sItemString, 
 
 void SituPlugin::OnAirportRunwayActivityChanged()
 {
+    SituLog::Line("EVT", "RUNWAYS", SituLog::Fields());
+
     // DisplayActiveRunways() dereferences m_pRadScr too, so it belongs inside the guard.
     // ~CSiTRadar sets m_pRadScr back to nullptr, so this is reachable once the last ASR closes.
     if (CSiTRadar::m_pRadScr != nullptr) {
@@ -806,6 +819,8 @@ void SituPlugin::OnCompilePrivateChat(const char* sSenderCallsign,
     const char* sReceiverCallsign,
     const char* sChatMessage)
 {
+    SituLog::Line("EVT", "CHAT", SituLog::Fields()
+        .Add("from", sSenderCallsign).Add("len", static_cast<int>(strlen(sChatMessage))));
 
     string s, cs, msg;
     s = sChatMessage;
@@ -836,4 +851,79 @@ void SituPlugin::OnCompilePrivateChat(const char* sSenderCallsign,
     if (entry->second.pointOutFromMe && !strcmp(msg.c_str(), "OK")) {
         entry->second.POAcceptTime = clock();
     }
+}
+
+bool SituPlugin::OnCompileCommand(const char* sCommandLine)
+{
+    const std::string commandText = sCommandLine != nullptr ? sCommandLine : "";
+    const SituLog::LogCommand command = SituLog::ParseLogCommand(commandText);
+    if (command.action == SituLog::LogAction::NotOurs) { return false; }
+
+    auto say = [this](const std::string& text) {
+        DisplayUserMessage("VATCAN Situ", "Log", text.c_str(), true, true, false, false, false);
+    };
+
+    // Record the command itself when the log is open. For "on" the open line covers it.
+    // The follow branches below re-emit this after an implied Enable, so that a cold-start
+    // ".situ log <CALLSIGN>" leaves a record of what was followed in the file it opened.
+    auto logCommand = [&commandText]() {
+        SituLog::Line("CMD", "log", SituLog::Fields().Add("args", commandText));
+    };
+    logCommand();
+
+    switch (command.action)
+    {
+    case SituLog::LogAction::On:
+    {
+        const SituLog::EnableResult r = SituLog::Enable(wxRadar::getSituWxDir());
+        say(r.ok ? "Logging to " + r.path : "Log NOT started: " + r.error);
+        break;
+    }
+    case SituLog::LogAction::Off:
+    {
+        const size_t lines = SituLog::LinesWritten();
+        SituLog::Disable();
+        say("Log closed, " + std::to_string(lines) + " lines.");
+        break;
+    }
+    case SituLog::LogAction::Follow:
+    {
+        if (!SituLog::IsEnabled())
+        {
+            const SituLog::EnableResult r = SituLog::Enable(wxRadar::getSituWxDir());
+            if (!r.ok) { say("Log NOT started: " + r.error); break; }
+            say("Logging to " + r.path);
+            logCommand();
+        }
+        SituLog::Follow(command.arg);
+        say("Following " + command.arg + ".");
+        break;
+    }
+    case SituLog::LogAction::FollowAll:
+    {
+        if (!SituLog::IsEnabled())
+        {
+            const SituLog::EnableResult r = SituLog::Enable(wxRadar::getSituWxDir());
+            if (!r.ok) { say("Log NOT started: " + r.error); break; }
+            say("Logging to " + r.path);
+            logCommand();
+        }
+        SituLog::Follow("ALL");
+        say("Following all aircraft - this is heavy; use .situ log none to stop.");
+        break;
+    }
+    case SituLog::LogAction::Unfollow:
+        SituLog::Unfollow();
+        say("Following nothing.");
+        break;
+    case SituLog::LogAction::Status:
+        say(SituLog::Status());
+        break;
+    case SituLog::LogAction::Help:
+    default:
+        say(".situ log on | off | status | none | all | <CALLSIGN>");
+        say("on/off start and stop the file; <CALLSIGN> or all also log draw decisions; none stops following.");
+        break;
+    }
+    return true;
 }

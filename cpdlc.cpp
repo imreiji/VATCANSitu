@@ -2,6 +2,9 @@
 #include "cpdlc.h"
 #include "CpdlcPacket.h"
 #include "CpdlcDcl.h"
+#include "SituLog.h"
+
+#include <chrono>
 
 unsigned int CPDLCMessage::ids = 0;
 std::string CPDLCMessage::hoppieCode = "";
@@ -262,6 +265,10 @@ void CPDLCMessage::SendCPDLCMessage() {
 
 	// The send had no timeout at all, so a hung gateway blocked whoever called it for as
 	// long as the OS allowed. Five seconds, matching the poll's order of magnitude.
+	//
+	// This runs on a detached worker, so nothing below may touch the EuroScope SDK.
+	// SituLog takes only its own mutex.
+	const auto t0 = std::chrono::steady_clock::now();
 	const SituHttp::Response post = SituHttp::Post(url, postfields, 5000);
 
 	// Hoppie answers "ok" on success. Anything else - a transport failure, a non-2xx, or
@@ -269,6 +276,20 @@ void CPDLCMessage::SendCPDLCMessage() {
 	// delivered.
 	this->sent = post.ok && post.body.compare(0, 2, "ok") == 0;
 
+	// The body carries Hoppie's own refusal when the transport itself worked. Capped: a
+	// proxy or captive portal answers with an HTML page, and that must not become a
+	// multi-kilobyte single line in the log. 200 leaves an error page identifiable.
+	const std::string error = post.ok
+		? (this->sent ? std::string() : SituLog::Truncate(post.body, 200))
+		: post.error;
+
+	SituLog::Line("NET", "cpdlc-send", SituLog::Fields()
+		.Add("to", this->receipient)
+		.Add("type", this->messageType)
+		.Add("ok", this->sent)
+		.Add("error", error)
+		.Add("ms", static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now() - t0).count())));
 }
 
 void CPDLCMessage::GenerateReply(CPDLCMessage originalMessage) {

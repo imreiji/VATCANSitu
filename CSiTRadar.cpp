@@ -27,6 +27,194 @@ bool CSiTRadar::cpdlcPollInFlight = false;
 int CSiTRadar::cpdlcConsecutiveFailures = 0;
 std::string CSiTRadar::cpdlcLastReportedError;
 
+namespace
+{
+	// Names for the CTR_DATA_TYPE_* constants, for the CTR-DATA log line.
+	const char* CtrDataTypeName(int type)
+	{
+		switch (type)
+		{
+		case CTR_DATA_TYPE_SQUAWK:              return "SQUAWK";
+		case CTR_DATA_TYPE_FINAL_ALTITUDE:      return "FINAL_ALTITUDE";
+		case CTR_DATA_TYPE_TEMPORARY_ALTITUDE:  return "TEMPORARY_ALTITUDE";
+		case CTR_DATA_TYPE_COMMUNICATION_TYPE:  return "COMMUNICATION_TYPE";
+		case CTR_DATA_TYPE_SCRATCH_PAD_STRING:  return "SCRATCH_PAD_STRING";
+		case CTR_DATA_TYPE_GROUND_STATE:        return "GROUND_STATE";
+		case CTR_DATA_TYPE_CLEARENCE_FLAG:      return "CLEARANCE_FLAG";
+		case CTR_DATA_TYPE_DEPARTURE_SEQUENCE:  return "DEPARTURE_SEQUENCE";
+		case CTR_DATA_TYPE_SPEED:               return "SPEED";
+		case CTR_DATA_TYPE_MACH:                return "MACH";
+		case CTR_DATA_TYPE_RATE:                return "RATE";
+		case CTR_DATA_TYPE_HEADING:             return "HEADING";
+		case CTR_DATA_TYPE_DIRECT_TO:           return "DIRECT_TO";
+		default:                                return "OTHER";
+		}
+	}
+
+	// The value the CTR_DATA type names, read back from the flight plan. The types with no
+	// accessor on CFlightPlanControllerAssignedData - ground state, the clearance flag and
+	// the departure sequence - fall through to the empty string; the type name still says
+	// which update arrived.
+	std::string CtrDataValue(CFlightPlan& fp, int type)
+	{
+		CFlightPlanControllerAssignedData d = fp.GetControllerAssignedData();
+		switch (type)
+		{
+		case CTR_DATA_TYPE_SQUAWK:              return d.GetSquawk();
+		case CTR_DATA_TYPE_FINAL_ALTITUDE:      return std::to_string(d.GetFinalAltitude());
+		case CTR_DATA_TYPE_TEMPORARY_ALTITUDE:  return std::to_string(d.GetClearedAltitude());
+		case CTR_DATA_TYPE_COMMUNICATION_TYPE:  return std::string(1, d.GetCommunicationType());
+		case CTR_DATA_TYPE_SCRATCH_PAD_STRING:  return d.GetScratchPadString();
+		case CTR_DATA_TYPE_SPEED:               return std::to_string(d.GetAssignedSpeed());
+		case CTR_DATA_TYPE_MACH:                return std::to_string(d.GetAssignedMach());
+		case CTR_DATA_TYPE_RATE:                return std::to_string(d.GetAssignedRate());
+		case CTR_DATA_TYPE_HEADING:             return std::to_string(d.GetAssignedHeading());
+		case CTR_DATA_TYPE_DIRECT_TO:           return d.GetDirectToPointName();
+		default:                                return "";
+		}
+	}
+
+	const char* ButtonName(int button)
+	{
+		switch (button)
+		{
+		case BUTTON_LEFT:   return "L";
+		case BUTTON_MIDDLE: return "M";
+		case BUTTON_RIGHT:  return "R";
+		default:            return "?";
+		}
+	}
+
+	// The screen object type as its constant name, so a click line reads without a trip to
+	// constants.h. Every id that reaches AddScreenObject is here: the plugin's own ids from
+	// constants.h plus the EuroScope tag item types the tags register themselves under.
+	// nullptr for anything else - the call site prints the number instead. Menus register
+	// some decorative buttons under type 0, which has no name and lands there.
+	const char* ScreenObjectName(int type)
+	{
+		switch (type)
+		{
+		// EuroScope's own types, used at AddScreenObject sites in ACTag.cpp.
+		case TAG_ITEM_TYPE_SQUAWK:                  return "TAG_ITEM_TYPE_SQUAWK";
+		case TAG_ITEM_TYPE_ALTITUDE:                return "TAG_ITEM_TYPE_ALTITUDE";
+		case CTR_DATA_TYPE_SCRATCH_PAD_STRING:      return "CTR_DATA_TYPE_SCRATCH_PAD_STRING";
+		case TAG_ITEM_TYPE_CALLSIGN:                return "TAG_ITEM_TYPE_CALLSIGN";
+		case TAG_ITEM_TYPE_COMMUNICATION_TYPE:      return "TAG_ITEM_TYPE_COMMUNICATION_TYPE";
+		case TAG_ITEM_TYPE_GROUND_SPEED_WITH_N:     return "TAG_ITEM_TYPE_GROUND_SPEED_WITH_N";
+		case TAG_ITEM_TYPE_PLANE_TYPE:              return "TAG_ITEM_TYPE_PLANE_TYPE";
+		case TAG_ITEM_TYPE_DESTINATION:             return "TAG_ITEM_TYPE_DESTINATION";
+		case TAG_ITEM_TYPE_ASSIGNED_HEADING:        return "TAG_ITEM_TYPE_ASSIGNED_HEADING";
+
+		// Targets and tags.
+		case TAG_ITEM_PLANE_HALO:                   return "TAG_ITEM_PLANE_HALO";
+		case AIRCRAFT_SYMBOL:                       return "AIRCRAFT_SYMBOL";
+		case AIRCRAFT_CJS:                          return "AIRCRAFT_CJS";
+		case TAG_ITEM_FP_CS:                        return "TAG_ITEM_FP_CS";
+		case TAG_ITEM_FP_FINAL_ALTITUDE:            return "TAG_ITEM_FP_FINAL_ALTITUDE";
+		case TAG_ALT:                               return "TAG_ALT";
+		case TAG_CPDLC:                             return "TAG_CPDLC";
+		case TAG_CPDLC_MNEMONIC:                    return "TAG_CPDLC_MNEMONIC";
+		case TAG_ITEM_CPDLC:                        return "TAG_ITEM_CPDLC";
+
+		// Top menu buttons.
+		case BUTTON_MENU:                           return "BUTTON_MENU";
+		case BUTTON_MENU_HALO_OPTIONS:              return "BUTTON_MENU_HALO_OPTIONS";
+		case BUTTON_MENU_ALT_FILT_OPT:              return "BUTTON_MENU_ALT_FILT_OPT";
+		case BUTTON_MENU_ALT_FILT_ON:               return "BUTTON_MENU_ALT_FILT_ON";
+		case BUTTON_MENU_ALT_FILT_SAVE:             return "BUTTON_MENU_ALT_FILT_SAVE";
+		case BUTTON_MENU_PTL_TOOL:                  return "BUTTON_MENU_PTL_TOOL";
+		case BUTTON_MENU_RELOCATE:                  return "BUTTON_MENU_RELOCATE";
+		case BUTTON_MENU_EXTRAP_FP:                 return "BUTTON_MENU_EXTRAP_FP";
+		case BUTTON_MENU_OVRD_ALL:                  return "BUTTON_MENU_OVRD_ALL";
+		case BUTTON_MENU_QUICK_LOOK:                return "BUTTON_MENU_QUICK_LOOK";
+		case BUTTON_MENU_EXT_ALT:                   return "BUTTON_MENU_EXT_ALT";
+		case BUTTON_MENU_PTL_CLOSE:                 return "BUTTON_MENU_PTL_CLOSE";
+		case BUTTON_MENU_PTL_CLEAR_ALL:             return "BUTTON_MENU_PTL_CLEAR_ALL";
+		case BUTTON_MENU_PTL_ALL_ON:                return "BUTTON_MENU_PTL_ALL_ON";
+		case BUTTON_MENU_PTL_OPTIONS:               return "BUTTON_MENU_PTL_OPTIONS";
+		case BUTTON_MENU_HALO_CLOSE:                return "BUTTON_MENU_HALO_CLOSE";
+		case BUTTON_MENU_HALO_CLEAR_ALL:            return "BUTTON_MENU_HALO_CLEAR_ALL";
+		case BUTTON_MENU_HALO_MOUSE:                return "BUTTON_MENU_HALO_MOUSE";
+		case BUTTON_MENU_HALO_TOOL:                 return "BUTTON_MENU_HALO_TOOL";
+		case BUTTON_MENU_WX_HIGH:                   return "BUTTON_MENU_WX_HIGH";
+		case BUTTON_MENU_WX_ALL:                    return "BUTTON_MENU_WX_ALL";
+		case BUTON_MENU_DEST_APRT:                  return "BUTON_MENU_DEST_APRT";
+		case BUTTON_MENU_CLOSE_DEST:                return "BUTTON_MENU_CLOSE_DEST";
+		case BUTTON_MENU_CLEAR_DEST:                return "BUTTON_MENU_CLEAR_DEST";
+		case BUTTON_MENU_DEST_1:                    return "BUTTON_MENU_DEST_1";
+		case BUTTON_MENU_DEST_2:                    return "BUTTON_MENU_DEST_2";
+		case BUTTON_MENU_DEST_3:                    return "BUTTON_MENU_DEST_3";
+		case BUTTON_MENU_DEST_4:                    return "BUTTON_MENU_DEST_4";
+		case BUTTON_MENU_DEST_5:                    return "BUTTON_MENU_DEST_5";
+		case BUTTON_MENU_DEST_ICAO:                 return "BUTTON_MENU_DEST_ICAO";
+		case BUTTON_MENU_DEST_DIST:                 return "BUTTON_MENU_DEST_DIST";
+		case BUTTON_MENU_DEST_EST:                  return "BUTTON_MENU_DEST_EST";
+		case BUTTON_MENU_DEST_VFR:                  return "BUTTON_MENU_DEST_VFR";
+		case BUTTON_MENU_QL_CJS:                    return "BUTTON_MENU_QL_CJS";
+		case BUTTON_MENU_PTL_WB:                    return "BUTTON_MENU_PTL_WB";
+		case BUTTON_MENU_PTL_EB:                    return "BUTTON_MENU_PTL_EB";
+		case BUTTON_MENU_RMB_MENU:                  return "BUTTON_MENU_RMB_MENU";
+		case BUTTON_MENU_RMB_MENU_SECONDARY:        return "BUTTON_MENU_RMB_MENU_SECONDARY";
+		case BUTTON_MENU_CPDLC_OPTION:              return "BUTTON_MENU_CPDLC_OPTION";
+		case BUTTON_MENU_TBS_HDG:                   return "BUTTON_MENU_TBS_HDG";
+		case BUTTON_MENU_TBS_MIXED:                 return "BUTTON_MENU_TBS_MIXED";
+		case BUTTON_MENU_CRDA:                      return "BUTTON_MENU_CRDA";
+		case BUTTON_MENU_CRDA_CLOSE:                return "BUTTON_MENU_CRDA_CLOSE";
+		case BUTTON_MENU_SETUP:                     return "BUTTON_MENU_SETUP";
+
+		// Menu functions.
+		case FUNCTION_ALT_FILT_LOW:                 return "FUNCTION_ALT_FILT_LOW";
+		case FUNCTION_ALT_FILT_HIGH:                return "FUNCTION_ALT_FILT_HIGH";
+		case FUNCTION_ALT_FILT_SAVE:                return "FUNCTION_ALT_FILT_SAVE";
+		case FUNCTION_DEST_ICAO_1:                  return "FUNCTION_DEST_ICAO_1";
+		case FUNCTION_DEST_ICAO_2:                  return "FUNCTION_DEST_ICAO_2";
+		case FUNCTION_DEST_ICAO_3:                  return "FUNCTION_DEST_ICAO_3";
+		case FUNCTION_DEST_ICAO_4:                  return "FUNCTION_DEST_ICAO_4";
+		case FUNCTION_DEST_ICAO_5:                  return "FUNCTION_DEST_ICAO_5";
+		case FUNCTION_RMB_POPUP:                    return "FUNCTION_RMB_POPUP";
+		case FUNCTION_TBS_HDG:                      return "FUNCTION_TBS_HDG";
+		case TBS_FOLLOWER_TOGGLE:                   return "TBS_FOLLOWER_TOGGLE";
+		case BUTTON_MENU_CPDLC:                     return "BUTTON_MENU_CPDLC";
+		case FUNCTION_CPDLC_ICAO:                   return "FUNCTION_CPDLC_ICAO";
+
+		// Background and free text.
+		case SCREEN_BACKGROUND:                     return "SCREEN_BACKGROUND";
+		case FREE_TEXT:                             return "FREE_TEXT";
+
+		// Windows.
+		case WINDOW_TITLE_BAR:                      return "WINDOW_TITLE_BAR";
+		case WINDOW_FLIGHT_PLAN:                    return "WINDOW_FLIGHT_PLAN";
+		case WINDOW_CTRL_REMARKS:                   return "WINDOW_CTRL_REMARKS";
+		case WINDOW_LIST_BOX_ELEMENT:               return "WINDOW_LIST_BOX_ELEMENT";
+		case WINDOW_TEXT_FIELD:                     return "WINDOW_TEXT_FIELD";
+		case WINDOW_HANDOFF_EXT_CJS:                return "WINDOW_HANDOFF_EXT_CJS";
+		case WINDOW_POINT_OUT:                      return "WINDOW_POINT_OUT";
+		case HIGHLIGHT_POINT_OUT_ACCEPT:            return "HIGHLIGHT_POINT_OUT_ACCEPT";
+		case WINDOW_DIRECT_TO:                      return "WINDOW_DIRECT_TO";
+		case WINDOW_SCROLL_ARROW_UP:                return "WINDOW_SCROLL_ARROW_UP";
+		case WINDOW_SCROLL_ARROW_DOWN:              return "WINDOW_SCROLL_ARROW_DOWN";
+		case WINDOW_FREE_TEXT:                      return "WINDOW_FREE_TEXT";
+		case WINDOW_CPDLC:                          return "WINDOW_CPDLC";
+		case WINDOW_CPDLC_EDITOR:                   return "WINDOW_CPDLC_EDITOR";
+
+		// Lists.
+		case LIST_OFF_SCREEN:                       return "LIST_OFF_SCREEN";
+		case LIST_TIME_ATIS:                        return "LIST_TIME_ATIS";
+		case LIST_MESSAGES:                         return "LIST_MESSAGES";
+		case LIST_ITEM_SIMPLE_STRING:               return "LIST_ITEM_SIMPLE_STRING";
+
+		default:                                    return nullptr;
+		}
+	}
+
+	// "type" for a log line: the constant name where there is one, else the raw number.
+	std::string ScreenObjectField(int type)
+	{
+		const char* name = ScreenObjectName(type);
+		return name != nullptr ? std::string(name) : std::to_string(type);
+	}
+}
+
 void CSiTRadar::StartCPDLCPoll()
 {
 	{
@@ -36,6 +224,8 @@ void CSiTRadar::StartCPDLCPoll()
 	}
 
 	std::thread poll([]() {
+		// SituLog only on this thread - it takes its own mutex and never calls the SDK.
+		const auto t0 = std::chrono::steady_clock::now();
 		std::string raw = CPDLCMessage::PollCPDLCMessages();
 
 		SCPDLCPollResult result;
@@ -53,6 +243,16 @@ void CSiTRadar::StartCPDLCPoll()
 		}
 
 		result.ready = true;
+
+		SituLog::Line("NET", "cpdlc-poll", SituLog::Fields()
+			.Add("ok", result.severity == SituCpdlcErrors::Ok)
+			.Add("messages", static_cast<int>(result.messages.size()))
+			// result.error is the raw Hoppie reply, so it is whatever answered - including
+			// a proxy's HTML error page. Capped so one bad reply cannot produce a
+			// multi-kilobyte line; 200 still identifies the page.
+			.Add("error", SituLog::Truncate(result.error, 200))
+			.Add("ms", static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::steady_clock::now() - t0).count())));
 
 		// A peek only applies to the first fetch after logon; later fetches poll, which
 		// consumes. Flipped here on the worker rather than at the call site, because the
@@ -126,6 +326,7 @@ void CSiTRadar::DrainCPDLCPoll()
 		if (fatal || text != cpdlcLastReportedError) {
 			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Hoppie CPDLC", text.c_str(),
 				true, false, false, false, false);
+			SituLog::Warn("Hoppie CPDLC", text);
 			cpdlcLastReportedError = text;
 		}
 
@@ -137,6 +338,7 @@ void CSiTRadar::DrainCPDLCPoll()
 	if (!cpdlcLastReportedError.empty()) {
 		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Hoppie CPDLC",
 			"CPDLC fetch recovered.", true, false, false, false, false);
+		SituLog::Warn("Hoppie CPDLC", "CPDLC fetch recovered.");
 		cpdlcLastReportedError.clear();
 	}
 	cpdlcConsecutiveFailures = 0;
@@ -158,9 +360,10 @@ void CSiTRadar::DrainCPDLCPoll()
 		// With no tag on screen there is no mnemonic to raise and no window to open from,
 		// so the chat area is the only place this can surface.
 		if (firstSighting) {
-			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-				(message.sender + " (not on scope): " + message.rawMessageContent).c_str(),
+			const std::string msg = message.sender + " (not on scope): " + message.rawMessageContent;
+			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(),
 				true, true, false, false, false);
+			SituLog::Warn("CPDLC", msg);
 		}
 
 		if (message.opensMnemonic) {
@@ -232,10 +435,17 @@ CSiTRadar::CSiTRadar()
 				// Say what was thrown away. A separation figure that failed to load is
 				// the worst thing in that file to be quiet about.
 				const size_t bad = tbsParsed.skippedLines.size() + tbsConfig.rejectedLines.size();
+
+				SituLog::Line("NET", "SituTBS.txt", SituLog::Fields().Add("path", tbsPath).Add("found", true)
+					.Add("airports", static_cast<int>(tbsConfig.airports.size()))
+					.Add("rules", static_cast<int>(tbsConfig.separation.size()))
+					.Add("rejected", static_cast<int>(bad)));
+
 				if (bad != 0) {
-					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "TBS",
-						("SituTBS.txt: " + std::to_string(bad) + " line(s) not understood and ignored").c_str(),
+					const std::string msg = "SituTBS.txt: " + std::to_string(bad) + " line(s) not understood and ignored";
+					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "TBS", msg.c_str(),
 						true, true, false, false, false);
+					SituLog::Warn("TBS", msg);
 				}
 
 				// An empty airport list is the same outcome as no file, and just as quiet
@@ -244,14 +454,18 @@ CSiTRadar::CSiTRadar()
 					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "TBS",
 						"SituTBS.txt names no airports; TBS markers are off",
 						true, true, false, false, false);
+					SituLog::Warn("TBS", "SituTBS.txt names no airports; TBS markers are off");
 				}
 			}
 			else {
+				SituLog::Line("NET", "SituTBS.txt", SituLog::Fields().Add("path", tbsPath).Add("found", false));
+
 				// The full path, because the folder is resolved from the DLL and the
 				// obvious guess - beside the DLL, or beside EuroScope.exe - is wrong.
-				GetPlugIn()->DisplayUserMessage("VATCAN Situ", "TBS",
-					("SituTBS.txt not found at " + tbsPath + "; TBS markers are off").c_str(),
+				const std::string msg = "SituTBS.txt not found at " + tbsPath + "; TBS markers are off";
+				GetPlugIn()->DisplayUserMessage("VATCAN Situ", "TBS", msg.c_str(),
 					true, true, false, false, false);
+				SituLog::Warn("TBS", msg);
 			}
 		}
 
@@ -265,23 +479,35 @@ CSiTRadar::CSiTRadar()
 				CPDLCMessage::dclTable = SituCpdlcDcl::Parse(cpdlcParsed);
 				cpdlcFreetext = SituCpdlcFreetext::Parse(cpdlcParsed);
 
+				SituLog::Line("NET", "SituCPDLC.txt", SituLog::Fields().Add("path", cpdlcPath).Add("found", true)
+					.Add("stations", static_cast<int>(cpdlcStations.stations.size()))
+					.Add("dcl", static_cast<int>(CPDLCMessage::dclTable.rules.size()))
+					.Add("freetext", static_cast<int>(cpdlcFreetext.entries.size()))
+					.Add("skipped", static_cast<int>(cpdlcStations.skippedLines.size()))
+					.Add("duplicates", static_cast<int>(cpdlcStations.duplicateControllerIds.size())));
+
 				if (!cpdlcStations.skippedLines.empty()) {
-					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-						("SituCPDLC.txt: " + std::to_string(cpdlcStations.skippedLines.size())
-							+ " line(s) not understood and ignored").c_str(),
+					const std::string msg = "SituCPDLC.txt: " + std::to_string(cpdlcStations.skippedLines.size())
+						+ " line(s) not understood and ignored";
+					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(),
 						true, true, false, false, false);
+					SituLog::Warn("CPDLC", msg);
 				}
 				for (const std::string& duplicate : cpdlcStations.duplicateControllerIds) {
-					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-						("SituCPDLC.txt: controller id " + duplicate
-							+ " is claimed by more than one station; the callsign prefix decides").c_str(),
+					const std::string msg = "SituCPDLC.txt: controller id " + duplicate
+						+ " is claimed by more than one station; the callsign prefix decides";
+					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(),
 						true, true, false, false, false);
+					SituLog::Warn("CPDLC", msg);
 				}
 			}
 			else {
-				GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-					("SituCPDLC.txt not found at " + cpdlcPath + "; no CPDLC stations are known").c_str(),
+				SituLog::Line("NET", "SituCPDLC.txt", SituLog::Fields().Add("path", cpdlcPath).Add("found", false));
+
+				const std::string msg = "SituCPDLC.txt not found at " + cpdlcPath + "; no CPDLC stations are known";
+				GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(),
 					true, true, false, false, false);
+				SituLog::Warn("CPDLC", msg);
 			}
 		}
 
@@ -316,6 +542,7 @@ CSiTRadar::CSiTRadar()
 				GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings",
 					"settings.json could not be read; starting from defaults",
 					true, true, false, false, false);
+				SituLog::Warn("Settings", "settings.json could not be read; starting from defaults");
 			}
 		}
 
@@ -328,6 +555,10 @@ CSiTRadar::CSiTRadar()
 		// blank SituLocal.txt in beside their existing settings.json - the credential was
 		// recovered and then immediately discarded, and Hoppie answered "no logon code".
 		SituSettings::FillEmptyFrom(local, migratedLocal);
+
+		SituLog::Line("NET", "settings", SituLog::Fields().Add("path", settingsPath)
+			.Add("found", SituFiles::Exists(settingsPath)).Add("local", SituFiles::Exists(localPath))
+			.Add("migrated", migratedFromJson));
 
 		wxRadar::wxLatCtr = settings.wxLat;
 		wxRadar::wxLongCtr = settings.wxLong;
@@ -354,15 +585,17 @@ CSiTRadar::CSiTRadar()
 		// Say what was thrown away rather than dropping it quietly.
 		const size_t badLines = settings.skippedLines.size() + local.skippedLines.size();
 		if (badLines != 0) {
-			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings",
-				(std::to_string(badLines) + " settings line(s) not understood and ignored").c_str(),
+			const std::string msg = std::to_string(badLines) + " settings line(s) not understood and ignored";
+			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings", msg.c_str(),
 				true, true, false, false, false);
+			SituLog::Warn("Settings", msg);
 		}
 
 		if (migratedFromJson) {
 			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings",
 				"settings.json migrated to settings.txt; the logon code moved to SituLocal.txt",
 				true, true, false, false, false);
+			SituLog::Warn("Settings", "settings.json migrated to settings.txt; the logon code moved to SituLocal.txt");
 		}
 	}
 	catch (const std::exception& e) {
@@ -375,9 +608,10 @@ CSiTRadar::CSiTRadar()
 		// constructor called from OnRadarScreenCreated must not let anything out: an
 		// exception leaving an SDK callback unwinds through frames built by a different
 		// compiler in a separately linked binary.
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings",
-			(string("settings load failed: ") + e.what()).c_str(),
+		const std::string msg = string("settings load failed: ") + e.what();
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Settings", msg.c_str(),
 			true, true, false, false, false);
+		SituLog::Warn("Settings", msg);
 	}
 
 	try {
@@ -409,6 +643,7 @@ CSiTRadar::CSiTRadar()
 	}
 	catch (...) {
 		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "WX Parser", string("PNG Failed to Parse").c_str(), true, false, false, false, false);
+		SituLog::Warn("WX Parser", "PNG Failed to Parse");
 	}
 
 	CSiTRadar::mAcData.reserve(256);
@@ -507,6 +742,7 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 		// the weather warnings.
 		const char* handler = (message.responseCode == ASYNC_MESSAGE_CPDLC) ? "CPDLC" : "Warning";
 		GetPlugIn()->DisplayUserMessage("VATCAN Situ", handler, message.reponseMessage.c_str(), true, false, false, false, false);
+		SituLog::Warn("async", message.reponseMessage);
 	}
 
 #pragma region timers
@@ -679,7 +915,8 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 					if (radarTarget.GetPosition().GetTransponderI() == TRUE && halfSecTick) { ppsColor = C_WHITE; }
 
-					RECT prect = CPPS::DrawPPS(&dc, isCorrelated, isVFR, isADSB, isRVSM, radarTarget.GetPosition().GetRadarFlags(), ppsColor, radarTarget.GetPosition().GetSquawk(), p);
+					const char* ppsShape = "NONE";
+					RECT prect = CPPS::DrawPPS(&dc, isCorrelated, isVFR, isADSB, isRVSM, radarTarget.GetPosition().GetRadarFlags(), ppsColor, radarTarget.GetPosition().GetSquawk(), p, &ppsShape);
 					AddScreenObject(AIRCRAFT_SYMBOL, callSign.c_str(), prect, FALSE, "");
 
 					// display CJS
@@ -720,8 +957,30 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 					}
 
+					const char* tagForm = "NONE";
 					if (radarTarget.GetPosition().GetRadarFlags() != 0) {
-						CACTag::DrawNARDSTag(&dc, this, &radarTarget, &radarTarget.GetCorrelatedFlightPlan(), &rtagOffset);
+						tagForm = CACTag::DrawNARDSTag(&dc, this, &radarTarget, &radarTarget.GetCorrelatedFlightPlan(), &rtagOffset);
+					}
+
+					// What this frame put on screen for this aircraft, logged only when it
+					// differs from the last line logged. IsFollowed is the whole per-target
+					// cost when nothing is followed.
+					if (SituLog::IsFollowed(callSign)) {
+						SituLog::DrawSnapshot snap;
+						snap.flags = radarTarget.GetPosition().GetRadarFlags();
+						snap.corr = isCorrelated;
+						snap.adsb = isADSB;
+						snap.rvsm = isRVSM;
+						snap.vfr = isVFR;
+						snap.sqk = radarTarget.GetPosition().GetSquawk();
+						snap.trk = GetPlugIn()->FlightPlanSelect(callSign.c_str()).GetTrackingControllerId();
+						snap.tag = mAcData[callSign].tagType;
+						snap.pps = ppsShape;
+						snap.colour = ppsColor == C_PPS_YELLOW ? "YELLOW" : ppsColor == C_PPS_ORANGE ? "ORANGE"
+							: ppsColor == C_PPS_MAGENTA ? "MAGENTA" : ppsColor == C_PPS_RED ? "RED" : "WHITE";
+						snap.vf = vfMarker;
+						snap.tagfn = tagForm;
+						SituLog::Draw(callSign, snap);
 					}
 				}
 
@@ -776,6 +1035,7 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 							if (sqitr == menuState.squawkCodes.end()) {
 
 								radarTarget.Uncorrelate();
+								SituLog::Line("ES>", "UNCORRELATE", SituLog::Fields().Add("callsign", callSign).Add("why", "no-code-match").Add("squawk", radarTarget.GetPosition().GetSquawk()));
 
 							}
 
@@ -791,6 +1051,7 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 									if (sqitr->numCorrelatedRT == 0) {
 
 										radarTarget.CorrelateWithFlightPlan(GetPlugIn()->FlightPlanSelect(sqitr->fpcs.c_str()));
+										SituLog::Line("ES>", "CORRELATE", SituLog::Fields().Add("callsign", callSign).Add("squawk", radarTarget.GetPosition().GetSquawk()).Add("fp", sqitr->fpcs));
 										sqitr->numCorrelatedRT++;
 										mAcData[callSign].multipleDiscrete = false;
 									}
@@ -799,6 +1060,7 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 										// Multiple discrete offender handling, squawk should be forced on and it should flash, and it should not correlate
 										radarTarget.Uncorrelate();
+										SituLog::Line("ES>", "UNCORRELATE", SituLog::Fields().Add("callsign", callSign).Add("why", "multiple-discrete").Add("squawk", radarTarget.GetPosition().GetSquawk()));
 										mAcData[callSign].multipleDiscrete = true;
 
 										// Reported by the message list, which reads this
@@ -834,10 +1096,12 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 						// No radar at all. Never allow an association to stand, which is
 						// what the original radarFlags == 0 clause said.
 						radarTarget.Uncorrelate();
+						SituLog::Line("ES>", "UNCORRELATE", SituLog::Fields().Add("callsign", callSign).Add("why", "no-radar"));
 						mAcData[callSign].autoCorrelationCleared = false;
 					}
 					else if (!mAcData[callSign].autoCorrelationCleared) {
 						radarTarget.Uncorrelate();
+						SituLog::Line("ES>", "UNCORRELATE", SituLog::Fields().Add("callsign", callSign).Add("why", "primary-only"));
 						mAcData[callSign].autoCorrelationCleared = true;
 					}
 
@@ -1057,17 +1321,19 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 					if (radarTarget.GetPosition().GetTransponderI() == TRUE && halfSecTick) { ppsColor = C_WHITE; }
 
-					RECT prect = CPPS::DrawPPS(&dc, isCorrelated, isVFR, isADSB, isRVSM, radarTarget.GetPosition().GetRadarFlags(), ppsColor, radarTarget.GetPosition().GetSquawk(), p);
+					const char* ppsShape = "NONE";
+					RECT prect = CPPS::DrawPPS(&dc, isCorrelated, isVFR, isADSB, isRVSM, radarTarget.GetPosition().GetRadarFlags(), ppsColor, radarTarget.GetPosition().GetSquawk(), p, &ppsShape);
 					AddScreenObject(AIRCRAFT_SYMBOL, callSign.c_str(), prect, FALSE, "");
 
+					const char* tagForm = "NONE";
 					if (radarTarget.GetPosition().GetRadarFlags() != 0 && radarTarget.GetPosition().GetRadarFlags() !=4) {
-						CACTag::DrawRTACTag(&dc, this, &radarTarget, &radarTarget.GetCorrelatedFlightPlan(), &rtagOffset);
+						tagForm = CACTag::DrawRTACTag(&dc, this, &radarTarget, &radarTarget.GetCorrelatedFlightPlan(), &rtagOffset);
 						if (radarTarget.GetGS() > 10) {
 							CACTag::DrawHistoryDots(&dc, &radarTarget);
 						}
 					}
 					else if (radarTarget.GetPosition().GetRadarFlags() == 4 && isADSB) {
-						CACTag::DrawRTACTag(&dc, this, &radarTarget, &radarTarget.GetCorrelatedFlightPlan(), &rtagOffset);
+						tagForm = CACTag::DrawRTACTag(&dc, this, &radarTarget, &radarTarget.GetCorrelatedFlightPlan(), &rtagOffset);
 						if (radarTarget.GetGS() > 10) {
 							CACTag::DrawHistoryDots(&dc, &radarTarget);
 						}
@@ -1098,6 +1364,7 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 							// Clear the entry used for pointout coordination
 							radarTarget.GetCorrelatedFlightPlan().GetControllerAssignedData().SetFlightStripAnnotation(0, "");
+							SituLog::Line("ES>", "ANNOT", SituLog::Fields().Add("callsign", callSign).Add("index", 0).Add("now", "").Add("why", "handoff-started"));
 						}
 					}
 					else {
@@ -1118,6 +1385,7 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 							// handoff cleared the point-out annotation on the selected
 							// aircraft and pushed its strip to that aircraft's POTarget.
 							GetPlugIn()->FlightPlanSelect(callSign.c_str()).GetControllerAssignedData().SetFlightStripAnnotation(1, "");
+							SituLog::Line("ES>", "ANNOT", SituLog::Fields().Add("callsign", callSign).Add("index", 1).Add("now", "").Add("why", "handoff-accepted"));
 							SendPointOut(mAcData[callSign].POTarget.c_str(), "", &GetPlugIn()->FlightPlanSelect(callSign.c_str()));
 
 							mAcData[callSign].pointOutFromMe = false;
@@ -1208,6 +1476,27 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 
 							dc.SetTextColor(cjsColor);
 						}
+					}
+
+					// What this frame put on screen for this aircraft, logged only when it
+					// differs from the last line logged. IsFollowed is the whole per-target
+					// cost when nothing is followed.
+					if (SituLog::IsFollowed(callSign)) {
+						SituLog::DrawSnapshot snap;
+						snap.flags = radarTarget.GetPosition().GetRadarFlags();
+						snap.corr = isCorrelated;
+						snap.adsb = isADSB;
+						snap.rvsm = isRVSM;
+						snap.vfr = isVFR;
+						snap.sqk = radarTarget.GetPosition().GetSquawk();
+						snap.trk = GetPlugIn()->FlightPlanSelect(callSign.c_str()).GetTrackingControllerId();
+						snap.tag = mAcData[callSign].tagType;
+						snap.pps = ppsShape;
+						snap.colour = ppsColor == C_PPS_YELLOW ? "YELLOW" : ppsColor == C_PPS_ORANGE ? "ORANGE"
+							: ppsColor == C_PPS_MAGENTA ? "MAGENTA" : ppsColor == C_PPS_RED ? "RED" : "WHITE";
+						snap.vf = vfMarker;
+						snap.tagfn = tagForm;
+						SituLog::Draw(callSign, snap);
 					}
 
 					// plane halo looks at the <map> hashalo to see if callsign has a halo, if so, draws halo
@@ -2361,8 +2650,9 @@ void CSiTRadar::DispatchCPDLCUplink(CPDLCMessage uplink, const std::string& call
 	// "sending", not "sent". Whether it arrived is not known for up to five seconds, and
 	// a failure line follows if it did not. Success stays quiet rather than putting two
 	// lines in the chat area for every uplink.
-	GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-		(callsign + ": sending - " + preview).c_str(), true, true, false, false, false);
+	const std::string sendingMsg = callsign + ": sending - " + preview;
+	GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", sendingMsg.c_str(), true, true, false, false, false);
+	SituLog::Warn("CPDLC", sendingMsg);
 
 	RequestRefresh();
 }
@@ -2401,8 +2691,9 @@ CPDLCMessage* CSiTRadar::LatestOpenDownlink(const std::string& callsign)
 void CSiTRadar::AcceptCPDLCLogon(const std::string& callsign)
 {
 	if (mAcData[callsign].cpdlcState == CPDLC_CONNECTED) {
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-			(callsign + ": already connected").c_str(), true, true, false, false, false);
+		const std::string msg = callsign + ": already connected";
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(), true, true, false, false, false);
+		SituLog::Warn("CPDLC", msg);
 		return;
 	}
 
@@ -2455,8 +2746,9 @@ std::string CSiTRadar::TerminatingReplyType()
 void CSiTRadar::EndCPDLCService(const std::string& callsign)
 {
 	if (mAcData[callsign].cpdlcState != CPDLC_CONNECTED) {
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-			(callsign + ": not connected").c_str(), true, true, false, false, false);
+		const std::string msg = callsign + ": not connected";
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(), true, true, false, false, false);
+		SituLog::Warn("CPDLC", msg);
 		return;
 	}
 
@@ -2478,9 +2770,10 @@ void CSiTRadar::SendCPDLCFreetext(const std::string& callsign, const std::string
 	if (entry == nullptr) {
 		// A button with nothing behind it says so. Sending a message the controller did
 		// not choose, with a reply type nobody set, is the worse outcome.
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-			(label + ": no such message in SituCPDLC.txt [FREETEXT]").c_str(),
+		const std::string msg = label + ": no such message in SituCPDLC.txt [FREETEXT]";
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(),
 			true, true, false, false, false);
+		SituLog::Warn("CPDLC", msg);
 		return;
 	}
 
@@ -2594,8 +2887,9 @@ void CSiTRadar::StageCPDLCUplink(const std::string& callsign, const CPDLCMessage
 	if (staged == nullptr) {
 		// No editor, which means no flight plan - the aircraft went away between the
 		// click and here. Say so rather than dropping the message silently.
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-			(callsign + ": no flight plan; cannot compose").c_str(), true, true, false, false, false);
+		const std::string msg = callsign + ": no flight plan; cannot compose";
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(), true, true, false, false, false);
+		SituLog::Warn("CPDLC", msg);
 		return;
 	}
 
@@ -2665,8 +2959,9 @@ void CSiTRadar::ComposeCPDLCPdc(const std::string& callsign)
 
 	CFlightPlan fp = GetPlugIn()->FlightPlanSelect(callsign.c_str());
 	if (!fp.IsValid()) {
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-			(callsign + ": no flight plan").c_str(), true, true, false, false, false);
+		const std::string msg = callsign + ": no flight plan";
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(), true, true, false, false, false);
+		SituLog::Warn("CPDLC", msg);
 		return;
 	}
 
@@ -2693,15 +2988,18 @@ void CSiTRadar::ComposeCPDLCPdc(const std::string& callsign)
 	const std::string identifier = uplink.MakePDCMessage(fp, me, atisLetter);
 
 	if (uplink.rawMessageContent.empty()) {
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-			(callsign + ": no departure clearance template matched " + fp.GetFlightPlanData().GetOrigin()).c_str(),
+		const std::string msg = callsign + ": no departure clearance template matched "
+			+ fp.GetFlightPlanData().GetOrigin();
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(),
 			true, true, false, false, false);
+		SituLog::Warn("CPDLC", msg);
 		return;
 	}
 
-	GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-		(callsign + ": clearance " + identifier + " ready to send").c_str(),
+	const std::string readyMsg = callsign + ": clearance " + identifier + " ready to send";
+	GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", readyMsg.c_str(),
 		true, true, false, false, false);
+	SituLog::Warn("CPDLC", readyMsg);
 
 	StageCPDLCUplink(callsign, uplink);
 }
@@ -2738,8 +3036,9 @@ void CSiTRadar::ComposeCPDLCUplink(const std::string& which, const std::string& 
 
 	CFlightPlan fp = GetPlugIn()->FlightPlanSelect(callsign.c_str());
 	if (!fp.IsValid()) {
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-			(callsign + ": no flight plan").c_str(), true, true, false, false, false);
+		const std::string msg = callsign + ": no flight plan";
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(), true, true, false, false, false);
+		SituLog::Warn("CPDLC", msg);
 		return;
 	}
 
@@ -2747,8 +3046,9 @@ void CSiTRadar::ComposeCPDLCUplink(const std::string& which, const std::string& 
 
 	// Refusals go through here so they read the same wherever they come from.
 	auto refuse = [&](const std::string& why) {
-		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
-			(callsign + ": " + why).c_str(), true, true, false, false, false);
+		const std::string msg = callsign + ": " + why;
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC", msg.c_str(), true, true, false, false, false);
+		SituLog::Warn("CPDLC", msg);
 	};
 
 	if (which == "CPDLCNDA" || which == "CPDLCContact" || which == "CPDLCMonitor") {
@@ -2911,6 +3211,8 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 	RECT Area,
 	int Button)
 {
+	SituLog::Line("EVT", "CLICK", SituLog::Fields()
+		.Add("type", ScreenObjectField(ObjectType)).Add("id", sObjectId).Add("button", ButtonName(Button)));
 
 	menuState.bgM3Click = false;
 
@@ -3080,6 +3382,7 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 						c = lelem.m_ListBoxElementText;
 						menuState.radarScrWindows.erase(stoi(id));
 						GetPlugIn()->FlightPlanSelect(cs.c_str()).GetControllerAssignedData().SetDirectToPointName(c.c_str());
+						SituLog::Line("ES>", "DIRECT", SituLog::Fields().Add("callsign", cs).Add("fix", c));
 
 						const CPosition ppos = GetPlugIn()->RadarTargetSelect(cs.c_str()).GetPosition().GetPosition();
 						string pposStr = SituPosition::FormatPositionString(ppos.m_Latitude, ppos.m_Longitude);
@@ -3099,6 +3402,7 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 
 						GetPlugIn()->FlightPlanSelect(cs.c_str()).GetFlightPlanData().SetRoute(rtestr.c_str());
 						GetPlugIn()->FlightPlanSelect(cs.c_str()).GetFlightPlanData().AmendFlightPlan();
+						SituLog::Line("ES>", "ROUTE", SituLog::Fields().Add("callsign", cs).Add("now", SituLog::Truncate(rtestr, 60)).Add("amended", true));
 
 						mAcData[cs].directToLineOn = false;
 						mAcData[cs].directToPendingPosition.m_Latitude = 0.0;
@@ -3116,6 +3420,7 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 			}
 
 			GetPlugIn()->FlightPlanSelect(cs.c_str()).GetControllerAssignedData().SetDirectToPointName(c.c_str());
+			SituLog::Line("ES>", "DIRECT", SituLog::Fields().Add("callsign", cs).Add("fix", c));
 			menuState.radarScrWindows.erase(stoi(id));
 			mAcData[cs].directToLineOn = false;
 			mAcData[cs].directToPendingPosition.m_Latitude = 0.0;
@@ -3394,7 +3699,9 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 	POINT Pt,
 	RECT Area,
 	int Button)
-{	
+{
+	SituLog::Line("EVT", "BTN-DOWN", SituLog::Fields()
+		.Add("type", ScreenObjectField(ObjectType)).Add("id", sObjectId).Add("button", ButtonName(Button)));
 
 	if (menuState.mouseMMB) { return; }
 
@@ -3419,7 +3726,11 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 
 	if (ObjectType == BUTTON_MENU_RMB_MENU) {
 		if (!strcmp(sObjectId, "AutoHandoff")) {
-			GetPlugIn()->FlightPlanSelectASEL().InitiateHandoff(GetPlugIn()->FlightPlanSelectASEL().GetCoordinatedNextController());
+			CFlightPlan handedOff = GetPlugIn()->FlightPlanSelectASEL();
+			const std::string toCallsign = handedOff.GetCoordinatedNextController();
+			const std::string toId = GetPlugIn()->ControllerSelect(toCallsign.c_str()).GetPositionId();
+			handedOff.InitiateHandoff(toCallsign.c_str());
+			SituLog::Line("ES>", "HANDOFF", SituLog::Fields().Add("callsign", handedOff.GetCallsign()).Add("to", toId).Add("to_cs", toCallsign).Add("via", "auto"));
 			menuState.MB3menu = false;
 		}
 		if (!strcmp(sObjectId, "FltPlan")) {
@@ -3429,14 +3740,17 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 		if (!strcmp(sObjectId, "AssumeTrack")) {
 			menuState.MB3menu = false;
 			GetPlugIn()->FlightPlanSelectASEL().StartTracking();
+			SituLog::Line("ES>", "TRACK", SituLog::Fields().Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign()));
 		}
 		if (!strcmp(sObjectId, "DropTrack")) {
 			menuState.MB3menu = false;
 			GetPlugIn()->FlightPlanSelectASEL().EndTracking();
+			SituLog::Line("ES>", "UNTRACK", SituLog::Fields().Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign()));
 		}
 		if (!strcmp(sObjectId, "Decorrelate")) {
 			menuState.MB3menu = false;
 			GetPlugIn()->FlightPlanSelectASEL().Uncorrelate();
+			SituLog::Line("ES>", "UNCORRELATE", SituLog::Fields().Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign()).Add("why", "menu"));
 		}		
 
 		if (!strcmp(sObjectId, "DirectTo")) {
@@ -3515,6 +3829,7 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 			menuState.MB3menu = false;
 			mAcData[GetPlugIn()->FlightPlanSelectASEL().GetCallsign()].pointOutFromMe = false;
 			GetPlugIn()->FlightPlanSelectASEL().GetControllerAssignedData().SetFlightStripAnnotation(1, "");
+			SituLog::Line("ES>", "ANNOT", SituLog::Fields().Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign()).Add("index", 1).Add("now", "").Add("why", "pointout-recall"));
 			SendPointOut(mAcData[GetPlugIn()->FlightPlanSelectASEL().GetCallsign()].POTarget.c_str(), "", &GetPlugIn()->FlightPlanSelect(GetPlugIn()->FlightPlanSelectASEL().GetCallsign()));
 
 			mAcData[GetPlugIn()->FlightPlanSelectASEL().GetCallsign()].POTarget = "";
@@ -3579,7 +3894,9 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 				return;
 			}
 
-			GetPlugIn()->FlightPlanSelectASEL().InitiateHandoff(GetPlugIn()->ControllerSelectByPositionId(sObjectId).GetCallsign());
+			const std::string toCallsign = GetPlugIn()->ControllerSelectByPositionId(sObjectId).GetCallsign();
+			GetPlugIn()->FlightPlanSelectASEL().InitiateHandoff(toCallsign.c_str());
+			SituLog::Line("ES>", "HANDOFF", SituLog::Fields().Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign()).Add("to", sObjectId).Add("to_cs", toCallsign).Add("via", "menu"));
 		}
 		if (!strcmp(menuState.MB3SecondaryMenuType.c_str(), "ModSFI")) {
 			ModifySFI(sObjectId, GetPlugIn()->FlightPlanSelectASEL());
@@ -3594,6 +3911,7 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 		if (!strcmp(menuState.MB3SecondaryMenuType.c_str(), "SetComm")) {
 			menuState.MB3menu = false;
 			GetPlugIn()->FlightPlanSelectASEL().GetControllerAssignedData().SetCommunicationType(*sObjectId);
+			SituLog::Line("ES>", "COMM", SituLog::Fields().Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign()).Add("type", std::string(1, *sObjectId)));
 		}
 		if (!strcmp(menuState.MB3SecondaryMenuType.c_str(), "PointOut")) {
 			menuState.MB3menu = false;
@@ -3692,6 +4010,7 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
 						"No Hoppie logon code. Put it in situWx\\SituLocal.txt as HoppieCode=...",
 						true, true, false, false, false);
+					SituLog::Warn("CPDLC", "No Hoppie logon code. Put it in situWx\\SituLocal.txt as HoppieCode=...");
 					return;
 				}
 				if (CPDLCMessage::hoppieICAO.empty()) {
@@ -3699,6 +4018,7 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 					GetPlugIn()->DisplayUserMessage("VATCAN Situ", "CPDLC",
 						"No station set. Enter one in the Setup panel, or HoppieICAO= in SituLocal.txt",
 						true, true, false, false, false);
+					SituLog::Warn("CPDLC", "No station set. Enter one in the Setup panel, or HoppieICAO= in SituLocal.txt");
 					return;
 				}
 
@@ -3988,6 +4308,7 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 		if (Button == BUTTON_LEFT) {
 			if (mAcData[sObjectId].isHandoffToMe == TRUE) {
 				GetPlugIn()->FlightPlanSelect(sObjectId).AcceptHandoff();
+				SituLog::Line("ES>", "HO-ACCEPT", SituLog::Fields().Add("callsign", sObjectId));
 			}
 			else {
 				StartTagFunction(sObjectId, NULL, TAG_ITEM_TYPE_PLANE_TYPE, sObjectId, NULL, TAG_ITEM_FUNCTION_TOGGLE_ROUTE_DRAW, Pt, Area);
@@ -4143,7 +4464,12 @@ void CSiTRadar::OnOverScreenObject(int ObjectType,
 }
 
 void CSiTRadar::OnMoveScreenObject(int ObjectType, const char* sObjectId, POINT Pt, RECT Area, bool Released) {
-	
+
+	// Only the drop, not every pixel of the drag.
+	if (Released) {
+		SituLog::Line("EVT", "MOVE", SituLog::Fields().Add("type", ScreenObjectField(ObjectType)).Add("id", sObjectId));
+	}
+
 	// Handling moving of the tags rendered by the plugin
 	CRadarTarget rt = GetPlugIn()->RadarTargetSelect(sObjectId);
 	CFlightPlan fp = GetPlugIn()->FlightPlanSelect(sObjectId);
@@ -4278,6 +4604,11 @@ void CSiTRadar::OnFunctionCall(int FunctionId,
 	POINT Pt,
 	RECT Area) {
 
+	SituLog::Line("EVT", "TAG-FUNC", SituLog::Fields()
+		.Add("id", FunctionId).Add("item", sItemString)
+		.Add("callsign", GetPlugIn()->FlightPlanSelectASEL().GetCallsign())
+		.Add("where", "screen"));
+
 	if (FunctionId == FUNCTION_ALT_FILT_LOW) {
 		try {
 			altFilterLow = stoi(sItemString);
@@ -4362,6 +4693,9 @@ void CSiTRadar::updateActiveRunways(int i) {
 				arrival.magneticDesignator = atoi(arrival.name.c_str()) * 10;
 
 				menuState.activeArrivalRunways.push_back(arrival);
+
+				SituLog::Line("NET", "RUNWAYS", SituLog::Fields()
+					.Add("airport", arrival.airport).Add("rwy", arrival.name).Add("course", arrival.trueCourse));
 			}
 		}
 	}
@@ -4500,10 +4834,23 @@ void CSiTRadar::OnAsrContentLoaded(bool Loaded) {
 
 	}
 	//
-} 
+
+	// At the end, so the altitude filters logged are the ones this ASR just loaded.
+	SituLog::Line("EVT", "ASR-LOAD", SituLog::Fields()
+		.Add("loaded", Loaded)
+		.Add("display", GetDataFromAsr("DisplayTypeName") != NULL ? GetDataFromAsr("DisplayTypeName") : "")
+		.Add("altlow", altFilterLow).Add("althigh", altFilterHigh));
+}
 
 void CSiTRadar::OnFlightPlanFlightPlanDataUpdate(CFlightPlan FlightPlan)
 {
+	SituLog::Line("EVT", "FP-DATA", SituLog::Fields()
+		.Add("callsign", FlightPlan.GetCallsign())
+		.Add("rule", FlightPlan.GetFlightPlanData().GetPlanType())
+		.Add("wtc", std::string(1, FlightPlan.GetFlightPlanData().GetAircraftWtc()))
+		.Add("capab", std::string(1, FlightPlan.GetFlightPlanData().GetCapibilities()))
+		.Add("rmk", SituLog::Truncate(FlightPlan.GetFlightPlanData().GetRemarks(), 60))
+		.Add("route", SituLog::Truncate(FlightPlan.GetFlightPlanData().GetRoute(), 60)));
 
 	int count = 0;
 	CSiTRadar::menuState.jurisdictionalAC.clear();
@@ -4609,6 +4956,11 @@ void CSiTRadar::OnFlightPlanFlightPlanDataUpdate(CFlightPlan FlightPlan)
 void CSiTRadar::OnFlightPlanControllerAssignedDataUpdate(CFlightPlan FlightPlan,
 	int DataType) {
 
+	SituLog::Line("EVT", "CTR-DATA", SituLog::Fields()
+		.Add("callsign", FlightPlan.GetCallsign())
+		.Add("type", CtrDataTypeName(DataType))
+		.Add("value", CtrDataValue(FlightPlan, DataType)));
+
 	// update the menustate.squawkcodes only if the planes data gets changed
 
 	if (DataType == CTR_DATA_TYPE_SQUAWK) {
@@ -4660,6 +5012,8 @@ void CSiTRadar::OnFlightPlanControllerAssignedDataUpdate(CFlightPlan FlightPlan,
 }
 
 void CSiTRadar::OnFlightPlanDisconnect(CFlightPlan FlightPlan) {
+	SituLog::Line("EVT", "FP-GONE", SituLog::Fields().Add("callsign", FlightPlan.GetCallsign()));
+
 	string callSign = FlightPlan.GetCallsign();
 
 	// Ten maps are keyed by callsign; only mAcData was cleaned here. The rest grew for the
@@ -4971,15 +5325,29 @@ void CSiTRadar::DrawACList(POINT p, CDC* dc, unordered_map<string, ACData>& ac, 
 
 void CSiTRadar::OnDoubleClickScreenObject(int ObjectType, const char* sObjectId, POINT Pt, RECT Area, int Button)
 {
-	
+	SituLog::Line("EVT", "DBLCLICK", SituLog::Fields().Add("type", ScreenObjectField(ObjectType)).Add("id", sObjectId));
 }
 
 void CSiTRadar::OnAsrContentToBeSaved() {
-
+	SituLog::Line("EVT", "ASR-SAVE", SituLog::Fields());
 }
 
 void CSiTRadar::OnControllerPositionUpdate(CController Controller)
 {
+	// This fires every few seconds for every controller online. Log first sight and any
+	// change of position id or frequency, nothing else.
+	{
+		static std::map<std::string, std::string> seen;   // callsign -> "id freq"
+		const std::string key = Controller.GetCallsign();
+		const std::string value = std::string(Controller.GetPositionId()) + " " + std::to_string(Controller.GetPrimaryFrequency());
+		if (seen[key] != value) {
+			seen[key] = value;
+			SituLog::Line("EVT", "CTRL", SituLog::Fields()
+				.Add("callsign", key).Add("id", Controller.GetPositionId())
+				.Add("freq", Controller.GetPrimaryFrequency()));
+		}
+	}
+
 	/*std::once_flag flag1;
 
 	std::call_once(flag1, [&]() {
@@ -5014,6 +5382,9 @@ void CSiTRadar::OnControllerPositionUpdate(CController Controller)
 }
 
 void CSiTRadar::OnControllerDisconnect(CController Controller) {
+	SituLog::Line("EVT", "CTRL-GONE", SituLog::Fields()
+		.Add("id", Controller.GetPositionId()).Add("callsign", Controller.GetCallsign()));
+
 	if (CSiTRadar::menuState.nearbyCJS.find(Controller.GetPositionId()) != CSiTRadar::menuState.nearbyCJS.end()) {
 		CSiTRadar::menuState.nearbyCJS.erase(Controller.GetPositionId());
 	}
@@ -5022,6 +5393,9 @@ void CSiTRadar::OnControllerDisconnect(CController Controller) {
 void CSiTRadar::OnFlightPlanFlightStripPushed(CFlightPlan FlightPlan,
 	const char* sSenderController,
 	const char* sTargetController) {
+
+	SituLog::Line("EVT", "STRIP", SituLog::Fields()
+		.Add("callsign", FlightPlan.GetCallsign()).Add("from", sSenderController).Add("to", sTargetController));
 
 	string poString = FlightPlan.GetControllerAssignedData().GetFlightStripAnnotation(0);
 

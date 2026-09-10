@@ -3,6 +3,7 @@
 #include <ctime>
 #include <vector>
 #include <string>
+#include "SituLog.h"
 
 struct ACList {
     // Offset from the top left of the radar area, not an absolute screen position. The
@@ -75,6 +76,10 @@ public:
     virtual void OnAirportRunwayActivityChanged();
 
     inline virtual void OnCompilePrivateChat(const char* sSenderCallsign, const char* sReceiverCallsign, const char* sChatMessage);
+
+    // .situ log <on|off|all|none|status|CALLSIGN>. Returns true only for lines that begin
+    // ".situ log", so other plugins' commands and ordinary chat pass through untouched.
+    bool OnCompileCommand(const char* sCommandLine) override;
 
     static void SendKeyboardPresses(std::vector<WORD> message);
     static void SendKeyboardString(std::string str);

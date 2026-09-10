@@ -17,9 +17,13 @@ public:
     static void DrawFPACTag(CDC* hdc, CRadarScreen* rad, CRadarTarget* rt, CFlightPlan* fp, unordered_map<string, POINT>* tOffset);
     static void DrawFPConnector(CDC* dc, CRadarScreen* rad, CRadarTarget* rt, CFlightPlan* fp, COLORREF color, unordered_map<string, POINT>* tOffset);
 
-    // Tags for Radar targets
-    static void CACTag::DrawRTACTag(CDC* dc, CRadarScreen* rad, CRadarTarget* rt, CFlightPlan* fp, unordered_map<string, POINT>* tOffset);
-    static void DrawNARDSTag(CDC* dc, CRadarScreen* rad, CRadarTarget* rt, CFlightPlan* fp, unordered_map<string, POINT>* tOffset);
+    // Tags for Radar targets.
+    //
+    // Both return the name of the tag form they drew - "ALPHA", "BRAVO", "UNCORR",
+    // "UNCORR-ADSB", "NARDS", or "NONE" when the tag type drew nothing. Only the
+    // SituDebug DRAW line reads it; callers are free to ignore it.
+    static const char* DrawRTACTag(CDC* dc, CRadarScreen* rad, CRadarTarget* rt, CFlightPlan* fp, unordered_map<string, POINT>* tOffset);
+    static const char* DrawNARDSTag(CDC* dc, CRadarScreen* rad, CRadarTarget* rt, CFlightPlan* fp, unordered_map<string, POINT>* tOffset);
     // The vertical movement indicator, drawn rather than typed.
     //
     // It used to be DrawText of "^" or "|", which the EuroScope tag font renders as half

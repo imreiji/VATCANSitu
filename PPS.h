@@ -11,10 +11,15 @@ class CPPS :
 {
 
 public:
-    static RECT DrawPPS(CDC* dc, BOOL isCorrelated, BOOL isVFR, BOOL isADSB, BOOL isRVSM, int radFlag, COLORREF ppsColor, string squawk, POINT p)
+    // shapeOut, when given, receives the name of the symbol actually drawn - the one left
+	// on screen after any fall through. Used by the SituDebug DRAW line; nothing about the
+	// drawing depends on it.
+	static RECT DrawPPS(CDC* dc, BOOL isCorrelated, BOOL isVFR, BOOL isADSB, BOOL isRVSM, int radFlag, COLORREF ppsColor, string squawk, POINT p, const char** shapeOut = nullptr)
 	{
 
 		int sDC = dc->SaveDC();
+
+		const char* shape = "NONE";
 
 		// Add the screenobject
 		RECT prect;
@@ -38,12 +43,14 @@ public:
 
 		case 1:
 			if (isCorrelated) {
+				shape = "TRIANGLE";
 				dc->SelectStockObject(NULL_BRUSH);
 
 				POINT vertices[] = { { p.x - 4, p.y + 4 } , { p.x, p.y - 4 } , { p.x + 4,p.y + 4 } }; // Yellow Triangle
 				dc->Polygon(vertices, 3);
 			}
 			else {
+				shape = "Y";
 				dc->MoveTo(p.x, p.y + 4);	// Magenta Y 
 				dc->LineTo(p.x, p.y);
 				dc->LineTo(p.x - 4, p.y - 4);
@@ -61,6 +68,8 @@ public:
 				// after this DeleteObject would have silently failed and leaked.
 				int sDCEmerg = dc->SaveDC();
 
+				shape = "TRIANGLE-FILLED";
+
 				HBRUSH targetBrush = CreateSolidBrush(ppsColor);
 				dc->SelectObject(targetBrush);
 
@@ -75,6 +84,7 @@ public:
 
 			if (!strcmp(squawk.c_str(), "1200") && !isCorrelated && radFlag != 1) { // Eventually change to block squawk codes
 
+				shape = "TRIANGLE";
 				dc->SelectStockObject(NULL_BRUSH);
 
 				POINT vertices[] = { { p.x - 4, p.y + 4 } , { p.x, p.y - 4 } , { p.x + 4,p.y + 4 } }; // Yellow Triangle
@@ -84,6 +94,7 @@ public:
 			}
 
 			if (isCorrelated && !isVFR && !isRVSM) {		// Code for radFlag equals 3 = SSR+PSR
+				shape = "HEXAGON";
 				dc->MoveTo(p.x - 4, p.y - 2);
 				dc->LineTo(p.x - 4, p.y + 2);
 				dc->LineTo(p.x, p.y + 5);
@@ -93,6 +104,7 @@ public:
 				dc->LineTo(p.x - 4, p.y - 2);
 			}
 			if (isCorrelated && !isVFR && isRVSM) {
+				shape = "DIAMOND";
 				dc->MoveTo(p.x, p.y - 5);
 				dc->LineTo(p.x + 5, p.y);
 				dc->LineTo(p.x, p.y + 5);
@@ -104,6 +116,7 @@ public:
 
 			}
 			if (isCorrelated && isVFR) {
+				shape = "CIRCLE-CHECK";
 				dc->SelectStockObject(NULL_BRUSH);
 
 				// draw the shape
@@ -115,6 +128,7 @@ public:
 			}
 			if (!isCorrelated) {
 
+				shape = "ASTERISK";
 				dc->MoveTo(p.x - 4, p.y - 4);
 				dc->LineTo(p.x + 5, p.y + 5);
 				dc->MoveTo(p.x, p.y - 5);
@@ -139,6 +153,7 @@ public:
 			// target instead of as an unknown VFR one.
 			if (!strcmp(squawk.c_str(), "1200") && !isCorrelated) {
 
+				shape = "TRIANGLE";
 				dc->SelectStockObject(NULL_BRUSH);
 
 				POINT vertices[] = { { p.x - 4, p.y + 4 } , { p.x, p.y - 4 } , { p.x + 4,p.y + 4 } }; // Yellow Triangle
@@ -150,6 +165,7 @@ public:
 			else {
 
 				if(isCorrelated) {
+				shape = "SQUARE";
 				dc->MoveTo(p.x - 4, p.y - 4);
 				dc->LineTo(p.x + 4, p.y - 4);
 				dc->LineTo(p.x + 4, p.y + 4);
@@ -158,6 +174,7 @@ public:
 	
 				// RVSM ADSB symbol
 					if (isRVSM) {
+						shape = "SQUARE-BAR";
 						dc->MoveTo(p.x, p.y - 4);
 						dc->LineTo(p.x, p.y + 4);
 					}
@@ -166,6 +183,7 @@ public:
 				else {
 					// ADSB non-correlated synmbol
 		
+					shape = "SQUARE-RAYS";
 					dc->MoveTo(p.x - 4, p.y - 4);
 					dc->LineTo(p.x + 4, p.y - 4);
 					dc->LineTo(p.x + 4, p.y + 4);
@@ -204,6 +222,7 @@ public:
 			// return whatever the equipment says.
 			if (isADSB && !strcmp(squawk.c_str(), "1200") && !isCorrelated) {
 
+				shape = "TRIANGLE";
 				dc->SelectStockObject(NULL_BRUSH);
 
 				POINT vertices[] = { { p.x - 4, p.y + 4 } , { p.x, p.y - 4 } , { p.x + 4,p.y + 4 } }; // Yellow Triangle
@@ -213,6 +232,7 @@ public:
 			}
 
 			if (isADSB) {
+				shape = "SQUARE";
 				dc->MoveTo(p.x - 4, p.y - 4);
 				dc->LineTo(p.x + 4, p.y - 4);
 				dc->LineTo(p.x + 4, p.y + 4);
@@ -221,6 +241,7 @@ public:
 
 				// RVSM ADSB symbol
 				if (isRVSM) {
+					shape = "SQUARE-BAR";
 					dc->MoveTo(p.x, p.y - 4);
 					dc->LineTo(p.x, p.y + 4);
 				}
@@ -231,6 +252,7 @@ public:
 
 					// ADSB non-correlated synmbol
 
+					shape = "SQUARE-RAYS";
 					dc->MoveTo(p.x - 4, p.y - 4);
 					dc->LineTo(p.x + 4, p.y - 4);
 					dc->LineTo(p.x + 4, p.y + 4);
@@ -261,8 +283,25 @@ public:
 
 			}
 			else {
-				// If not ADSB by equipment, treat like a RADFLAG 2 or 3
+				// If not ADSB by equipment, treat like a RADFLAG 2 or 3 - including the
+				// 1200 rule. This branch copied the shapes from the Mode A/C case but not
+				// the test above them, so a non-ADS-B aircraft on 1200 under Mode S
+				// coverage drew the uncorrelated asterisk instead of the VFR triangle.
+				// Mode S coverage is what most sector files declare, so that was the
+				// common case, not the exception.
+				if (!strcmp(squawk.c_str(), "1200") && !isCorrelated) {
+
+					shape = "TRIANGLE";
+					dc->SelectStockObject(NULL_BRUSH);
+
+					POINT vertices[] = { { p.x - 4, p.y + 4 } , { p.x, p.y - 4 } , { p.x + 4,p.y + 4 } }; // Yellow Triangle
+					dc->Polygon(vertices, 3);
+
+					break;
+				}
+
 				if (isCorrelated && !isVFR && !isRVSM) {		// Code for radFlag equals 3 = SSR+PSR
+					shape = "HEXAGON";
 					dc->MoveTo(p.x - 4, p.y - 2);
 					dc->LineTo(p.x - 4, p.y + 2);
 					dc->LineTo(p.x, p.y + 5);
@@ -272,6 +311,7 @@ public:
 					dc->LineTo(p.x - 4, p.y - 2);
 				}
 				if (isCorrelated && !isVFR && isRVSM) {
+					shape = "DIAMOND";
 					dc->MoveTo(p.x, p.y - 5);
 					dc->LineTo(p.x + 5, p.y);
 					dc->LineTo(p.x, p.y + 5);
@@ -283,6 +323,7 @@ public:
 
 				}
 				if (isCorrelated && isVFR) {
+					shape = "CIRCLE-CHECK";
 					dc->SelectStockObject(NULL_BRUSH);
 
 					// draw the shape
@@ -295,6 +336,7 @@ public:
 
 				if (!isCorrelated) {
 
+					shape = "ASTERISK";
 					dc->MoveTo(p.x - 4, p.y - 4);
 					dc->LineTo(p.x + 5, p.y + 5);
 					dc->MoveTo(p.x, p.y - 5);
@@ -314,6 +356,7 @@ public:
 		// restore, then delete - this runs for every radar target every frame
 		dc->RestoreDC(sDC);
 		DeleteObject(targetPen);
+		if (shapeOut != nullptr) { *shapeOut = shape; }
 		return prect;
 	};
 
