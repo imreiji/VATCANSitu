@@ -41,6 +41,13 @@ namespace SituLog
     // callsign, or when none has been. Does nothing unless the callsign is followed.
     void Draw(const std::string& callsign, const DrawSnapshot& now);
 
+    // Logs a line under cat/subject when key differs from the last key logged for that
+    // pair, or none has been. The key is the caller's summary of the decision; the fields
+    // are the full state at the moment it changed. Same shape as Draw, for anything that
+    // is decided every frame but only interesting when the decision flips. Does nothing
+    // unless the subject is a followed callsign.
+    void OnChange(const char* cat, const std::string& subject, const std::string& key, const Fields& fields);
+
     std::string Status();
     size_t LinesWritten();
 }

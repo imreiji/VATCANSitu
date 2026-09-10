@@ -1215,90 +1215,140 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 					// it used to be here, gated on the destination being CYYZ, with
 					// Toronto's variation written as a bare 10 in two places with
 					// opposite signs.
+					//
+					// Every gate is evaluated into a named result rather than nested
+					// ifs, so the SituDebug TBS line can say which one stopped the
+					// marker. Nothing about what is drawn changed: the marker appears
+					// exactly when tbsStop is empty, which is the same condition the
+					// nested form expressed.
 					{
 						const CFlightPlan tbsFp = radarTarget.GetCorrelatedFlightPlan();
 						const int clearedAltitude = tbsFp.GetControllerAssignedData().GetClearedAltitude();
+						const string tbsDestination = tbsFp.GetFlightPlanData().GetDestination();
+						const SituTbs::Airport* tbsAirport = SituTbs::FindAirport(tbsConfig, tbsDestination);
+						const double distanceToDest = tbsFp.GetDistanceToDestination();
+						const int pressureAltitude = radarTarget.GetPosition().GetPressureAltitude();
+						const char leaderWtc = tbsFp.GetFlightPlanData().GetAircraftWtc();
+						const char followerWtc = SituTbs::WtcForFollowerIndex(mAcData[callSign].follower);
+
+						const char* tbsStop = "";
+						double approachCourse = -1.0;
+						string matchedRunway;
+						double nearestDelta = 0.0;
+						bool anyRunway = false;
+						double tbsDist = 0;
 
 						// 1 and 2 are the EuroScope conventions for cleared for approach.
-						if (clearedAltitude == 1 || clearedAltitude == 2) {
+						if (clearedAltitude != 1 && clearedAltitude != 2) {
+							tbsStop = "not-cleared-approach";
+						}
+						else if (tbsAirport == nullptr) {
+							tbsStop = "airport-not-in-SituTBS";
+						}
+						else if (!(distanceToDest < tbsConfig.gate.maxDistanceNm && distanceToDest > tbsConfig.gate.minDistanceNm)) {
+							tbsStop = "distance";
+						}
+						else if (!(pressureAltitude > tbsConfig.gate.minAltitudeFt)) {
+							tbsStop = "altitude";
+						}
+						else {
+							// Which runway the aircraft is established on. The course
+							// comes from the runway's own thresholds, so it is true
+							// already and the track can be compared to it directly -
+							// this is what removed the hardcoded magnetic variation.
+							//
+							// A course typed into the menu narrows it to one runway
+							// when several are active. That comparison is against the
+							// designator, which is magnetic like the typed value, so
+							// it needs no conversion either.
+							for (const ActiveArrivalRunway& arrival : menuState.activeArrivalRunways) {
+								if (arrival.airport != tbsDestination) { continue; }
 
-							const string tbsDestination = tbsFp.GetFlightPlanData().GetDestination();
-							const SituTbs::Airport* tbsAirport =
-								SituTbs::FindAirport(tbsConfig, tbsDestination);
-
-							const double distanceToDest = tbsFp.GetDistanceToDestination();
-
-							if (tbsAirport != nullptr
-								&& distanceToDest < tbsConfig.gate.maxDistanceNm
-								&& distanceToDest > tbsConfig.gate.minDistanceNm
-								&& radarTarget.GetPosition().GetPressureAltitude() > tbsConfig.gate.minAltitudeFt) {
-
-								// Which runway the aircraft is established on. The course
-								// comes from the runway's own thresholds, so it is true
-								// already and the track can be compared to it directly -
-								// this is what removed the hardcoded magnetic variation.
-								//
-								// A course typed into the menu narrows it to one runway
-								// when several are active. That comparison is against the
-								// designator, which is magnetic like the typed value, so
-								// it needs no conversion either.
-								double approachCourse = -1.0;
-
-								for (const ActiveArrivalRunway& arrival : menuState.activeArrivalRunways) {
-									if (arrival.airport != tbsDestination) { continue; }
-
-									if (menuState.tbsHdg != 0) {
-										int designatorDelta = (arrival.magneticDesignator - menuState.tbsHdg + 540) % 360 - 180;
-										if (abs(designatorDelta) > 15) { continue; }
-									}
-
-									// Normalised to -180..180 so a track either side of
-									// north is still a small difference: the raw
-									// subtraction reads 358 against 5 as 363 rather than
-									// -7, and TBS would silently refuse to engage on a
-									// runway pointing near north.
-									double headingDelta = radarTarget.GetTrackHeading() - arrival.trueCourse;
-									headingDelta = fmod(headingDelta + 180.0, 360.0);
-									if (headingDelta < 0) { headingDelta += 360.0; }
-									headingDelta -= 180.0;
-
-									if (fabs(headingDelta) < tbsConfig.gate.headingToleranceDeg) {
-										approachCourse = arrival.trueCourse;
-										break;
-									}
+								if (menuState.tbsHdg != 0) {
+									int designatorDelta = (arrival.magneticDesignator - menuState.tbsHdg + 540) % 360 - 180;
+									if (abs(designatorDelta) > 15) { continue; }
 								}
 
-								if (approachCourse >= 0.0) {
+								// Normalised to -180..180 so a track either side of
+								// north is still a small difference: the raw
+								// subtraction reads 358 against 5 as 363 rather than
+								// -7, and TBS would silently refuse to engage on a
+								// runway pointing near north.
+								double headingDelta = radarTarget.GetTrackHeading() - arrival.trueCourse;
+								headingDelta = fmod(headingDelta + 180.0, 360.0);
+								if (headingDelta < 0) { headingDelta += 360.0; }
+								headingDelta -= 180.0;
 
-									double tbsDist = 0;
-									const bool haveSeparation = SituTbs::SeparationFor(
-										tbsConfig,
-										tbsFp.GetFlightPlanData().GetAircraftWtc(),
-										SituTbs::WtcForFollowerIndex(mAcData[callSign].follower),
-										radarTarget.GetGS(),
-										menuState.tbsMixed,
-										tbsDist);
+								// Remember the nearest runway even when none matches, so
+								// the log can say how far off the track was.
+								if (!anyRunway || fabs(headingDelta) < fabs(nearestDelta)) {
+									nearestDelta = headingDelta;
+									matchedRunway = arrival.name;
+								}
+								anyRunway = true;
 
-									if (haveSeparation) {
-										POINT followerP = HaloTool::drawTBS(&dc, radarTarget, this, p, tbsDist, pixnm,
-											approachCourse);
-
-										// draw letter to allow toggling of follower
-										dc.SelectObject(CFontHelper::Euroscope14);
-										dc.SetTextColor(C_PPS_TBS_PINK);
-
-										RECT rectTBS;
-										rectTBS.left = followerP.x + 5;
-										rectTBS.right = followerP.x + 15;
-										rectTBS.top = followerP.y - 5;
-										rectTBS.bottom = followerP.y + 10;
-
-										const string tbsFollowerStr(1, SituTbs::WtcForFollowerIndex(mAcData[callSign].follower));
-										dc.DrawText(tbsFollowerStr.c_str(), &rectTBS, DT_LEFT);
-										AddScreenObject(TBS_FOLLOWER_TOGGLE, callSign.c_str(), rectTBS, false, "Toggle TBS Follower");
-									}
+								if (fabs(headingDelta) < tbsConfig.gate.headingToleranceDeg) {
+									approachCourse = arrival.trueCourse;
+									matchedRunway = arrival.name;
+									nearestDelta = headingDelta;
+									break;
 								}
 							}
+
+							if (approachCourse < 0.0) {
+								tbsStop = anyRunway ? "track-off-runway" : "no-active-arrival-runway";
+							}
+							else if (!SituTbs::SeparationFor(tbsConfig, leaderWtc, followerWtc, radarTarget.GetGS(), menuState.tbsMixed, tbsDist)) {
+								tbsStop = "no-separation-rule";
+							}
+							else {
+								POINT followerP = HaloTool::drawTBS(&dc, radarTarget, this, p, tbsDist, pixnm,
+									approachCourse);
+
+								// draw letter to allow toggling of follower
+								dc.SelectObject(CFontHelper::Euroscope14);
+								dc.SetTextColor(C_PPS_TBS_PINK);
+
+								RECT rectTBS;
+								rectTBS.left = followerP.x + 5;
+								rectTBS.right = followerP.x + 15;
+								rectTBS.top = followerP.y - 5;
+								rectTBS.bottom = followerP.y + 10;
+
+								const string tbsFollowerStr(1, followerWtc);
+								dc.DrawText(tbsFollowerStr.c_str(), &rectTBS, DT_LEFT);
+								AddScreenObject(TBS_FOLLOWER_TOGGLE, callSign.c_str(), rectTBS, false, "Toggle TBS Follower");
+							}
+						}
+
+						// One line per change of decision, not per frame: the key holds
+						// the gate that stopped it and the things that decide the marker's
+						// geometry; distance, altitude and track ride along as values so
+						// the line says where the aircraft was when the decision flipped.
+						if (SituLog::IsFollowed(callSign)) {
+							char sepKey[16];
+							std::snprintf(sepKey, sizeof(sepKey), "%.1f", tbsDist);
+							const std::string key = std::string(tbsStop) + "|" + std::to_string(clearedAltitude) + "|"
+								+ tbsDestination + "|" + (tbsAirport != nullptr ? "1" : "0") + "|" + matchedRunway + "|" + sepKey
+								+ "|" + std::to_string(menuState.tbsHdg) + "|" + (menuState.tbsMixed ? "1" : "0");
+
+							SituLog::OnChange("TBS", callSign, key, SituLog::Fields()
+								.Add("stop", tbsStop)
+								.Add("cfl", clearedAltitude)
+								.Add("dest", tbsDestination)
+								.Add("airport", tbsAirport != nullptr)
+								.Add("dist", distanceToDest)
+								.Add("alt", pressureAltitude)
+								.Add("track", radarTarget.GetTrackHeading())
+								.Add("rwy", matchedRunway)
+								.Add("course", approachCourse)
+								.Add("delta", nearestDelta)
+								.Add("hdgfilter", menuState.tbsHdg)
+								.Add("mixed", menuState.tbsMixed)
+								.Add("wtc", std::string(1, leaderWtc))
+								.Add("follower", std::string(1, followerWtc))
+								.Add("gs", static_cast<int>(radarTarget.GetGS()))
+								.Add("sep", tbsDist));
 						}
 					}
 
