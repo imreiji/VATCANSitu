@@ -19,6 +19,7 @@ namespace
     bool g_followAll = false;
     std::set<std::string> g_followed;
     std::map<std::string, SituLog::DrawSnapshot> g_lastSnapshot;
+    std::map<std::string, std::string> g_lastKey;   // "cat|subject" -> key, for OnChange
     std::string g_path;
     size_t g_lines = 0;
 
@@ -106,6 +107,7 @@ namespace SituLog
         g_lines = 0;
         // A new file starts with a full baseline for every followed aircraft.
         g_lastSnapshot.clear();
+        g_lastKey.clear();
         WriteLocked(FormatLine(NowForLine(), "CMD", "log", Fields().Add("opened", g_path)));
 
         // WriteLocked turns the log off again if that first line did not reach the disk, so
@@ -146,6 +148,7 @@ namespace SituLog
         g_followAll = false;
         g_followed.clear();
         g_lastSnapshot.clear();
+        g_lastKey.clear();
     }
 
     bool IsFollowed(const std::string& callsign)
@@ -199,6 +202,25 @@ namespace SituLog
             WriteLocked(FormatLine(NowForLine(), "DRAW", callsign, SnapshotFields(now)));
         }
         catch (...) { }
+    }
+
+    void OnChange(const char* cat, const std::string& subject, const std::string& key, const Fields& fields)
+    {
+        // Same boundary rule as Line and Draw: this runs inside EuroScope callbacks.
+        try
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            if (!g_enabled) { return; }
+            if (!g_followAll && g_followed.count(subject) == 0) { return; }
+
+            const std::string slot = std::string(cat != nullptr ? cat : "") + "|" + subject;
+            auto it = g_lastKey.find(slot);
+            if (it != g_lastKey.end() && it->second == key) { return; }
+
+            g_lastKey[slot] = key;
+            WriteLocked(FormatLine(NowForLine(), cat, subject, fields));
+        }
+        catch (...) {}
     }
 
     std::string Status()
