@@ -16,6 +16,10 @@ struct SWindowElements {
 struct SWindowText {
 	POINT location;
 	string text;
+	// When width is set the text is centred in [location.x, location.x + width) instead
+	// of starting at location.x. font null means Segoe14.
+	int width{ 0 };
+	CFont* font{ nullptr };
 	void RenderText(CDC* m_dc, POINT origin);
 };
 
@@ -31,6 +35,10 @@ struct SListBoxScrollBar {
 	int m_clicks;
 	RECT uparrow;
 	RECT downarrow;
+	// The slider as last drawn and the track between the arrows it can move in, so the
+	// slider can be registered as a draggable object and a drop mapped back to a row.
+	RECT slider{ 0, 0, 0, 0 };
+	RECT track{ 0, 0, 0, 0 };
 	POINT m_origin;
 	SListBoxScrollBar() {}
 
@@ -53,7 +61,6 @@ struct SListBoxScrollBar {
 		dc->SelectObject(targetBrush);
 
 		RECT scrollbar;
-		RECT slider;
 
 		scrollbar.top = m_origin.y;
 		scrollbar.bottom = m_origin.y + m_height;
@@ -76,6 +83,7 @@ struct SListBoxScrollBar {
 		int deltay = static_cast<int>(((downarrow.top - uparrow.bottom) - ((downarrow.top - uparrow.bottom) * m_max_elements / (m_total_elements))) / (m_clicks - 1));
 		slider.top = uparrow.bottom + deltay* m_slider_location;
 		slider.bottom = slider.top + static_cast<int>(round((downarrow.top - uparrow.bottom)*m_max_elements/(m_total_elements)));
+		track = { m_origin.x, uparrow.bottom, m_origin.x + m_width, downarrow.top };
 
 		dc->MoveTo({ uparrow.left + 1, uparrow.bottom - 3 });
 		dc->LineTo({ uparrow.left + 4, uparrow.top + 2 });
@@ -315,6 +323,20 @@ struct SListBox {
 	};
 	std::vector<CPDLCRow> FlattenCPDLCRows();
 	void RenderCPDLCListBox(POINT winOrigin);
+	// The first row for a slider whose top edge was dropped at sliderTop, clamped to the
+	// range the arrows can reach. The slider's own height is excluded from the travel so
+	// the bottom of the list is reachable.
+	int FirstRowForSliderTop(int sliderTop) const {
+		const int total = m_last_element - m_nearestPtIdx;
+		const int maxFirst = total - m_max_elements;
+		if (maxFirst <= 0) { return 0; }
+		const int travel = (m_scrbar.track.bottom - m_scrbar.track.top) - (m_scrbar.slider.bottom - m_scrbar.slider.top);
+		if (travel <= 0) { return 0; }
+		int first = (int)((double)(sliderTop - m_scrbar.track.top) / (double)travel * (double)maxFirst + 0.5);
+		if (first < 0) { first = 0; }
+		if (first > maxFirst) { first = maxFirst; }
+		return first;
+	}
 	void ScrollUp() {
 		if (m_LB_firstElem_idx > 0) {
 			m_LB_firstElem_idx--;
@@ -346,6 +368,7 @@ struct SWindowButton {
 	RECT m_WindowButtonRect;
 	CDC* m_dc;
 	COLORREF m_textcolor{ C_MENU_TEXT_WHITE };
+	COLORREF m_fillcolor{ C_MENU_GREY3 };
 
 	SWindowButton() {}
 	
@@ -362,8 +385,8 @@ struct SWindowButton {
 		m_dc->SetTextColor(m_textcolor);
 
 		HPEN targetPen = CreatePen(PS_SOLID, 1, C_MENU_GREY1);
-		HBRUSH targetBrush = CreateSolidBrush(C_MENU_GREY3);
-		HBRUSH tb2 = CreateSolidBrush(C_MENU_GREY3);
+		HBRUSH targetBrush = CreateSolidBrush(m_fillcolor);
+		HBRUSH tb2 = CreateSolidBrush(m_fillcolor);
 
 		m_dc->SelectObject(targetPen);
 		m_dc->SelectObject(targetBrush);

@@ -7,6 +7,7 @@ CFont CFontHelper::Euroscope16;
 CFont CFontHelper::EuroscopeFixed14;
 CFont CFontHelper::Segoe12;
 CFont CFontHelper::Segoe14;
+CFont CFontHelper::Segoe16;
 
 void CFontHelper::CreateFonts()
 {
@@ -42,6 +43,9 @@ void CFontHelper::CreateFonts()
 	lgfont.lfHeight = 14;
 	CFontHelper::Segoe14.CreateFontIndirect(&lgfont);
 
+	lgfont.lfHeight = 16;
+	CFontHelper::Segoe16.CreateFontIndirect(&lgfont);
+
 }
 
 void CFontHelper::DeleteFonts() {
@@ -57,4 +61,5 @@ void CFontHelper::DeleteFonts() {
 	CFontHelper::EuroscopeBold.DeleteObject();
 	CFontHelper::Segoe12.DeleteObject();
 	CFontHelper::Segoe14.DeleteObject();
+	CFontHelper::Segoe16.DeleteObject();
 }

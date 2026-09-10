@@ -194,6 +194,7 @@ namespace
 		case WINDOW_DIRECT_TO:                      return "WINDOW_DIRECT_TO";
 		case WINDOW_SCROLL_ARROW_UP:                return "WINDOW_SCROLL_ARROW_UP";
 		case WINDOW_SCROLL_ARROW_DOWN:              return "WINDOW_SCROLL_ARROW_DOWN";
+		case WINDOW_SCROLL_SLIDER:                  return "WINDOW_SCROLL_SLIDER";
 		case WINDOW_FREE_TEXT:                      return "WINDOW_FREE_TEXT";
 		case WINDOW_CPDLC:                          return "WINDOW_CPDLC";
 		case WINDOW_CPDLC_EDITOR:                   return "WINDOW_CPDLC_EDITOR";
@@ -1771,6 +1772,9 @@ void CSiTRadar::OnRefresh(HDC hdc, int phase)
 						lbFuncStr = to_string(window.second.m_windowId_) + " " + to_string(listbox.m_ListBoxID);
 						AddScreenObject(WINDOW_SCROLL_ARROW_UP, lbFuncStr.c_str(), listbox.m_scrbar.uparrow, false, (lbFuncStr + " Up").c_str());
 						AddScreenObject(WINDOW_SCROLL_ARROW_DOWN, lbFuncStr.c_str(), listbox.m_scrbar.downarrow, false, (lbFuncStr + " Down").c_str());
+						if (listbox.m_has_scroll_bar) {
+							AddScreenObject(WINDOW_SCROLL_SLIDER, lbFuncStr.c_str(), listbox.m_scrbar.slider, true, (lbFuncStr + " Slider").c_str());
+						}
 					}
 
 					for (auto& tf : window.second.m_textfields_) {
@@ -4736,6 +4740,28 @@ void CSiTRadar::OnMoveScreenObject(int ObjectType, const char* sObjectId, POINT 
 			window->second.m_origin = { Area.left, Area.top };
 			RequestRefresh();
 		}
+	}
+
+	if (ObjectType == WINDOW_SCROLL_SLIDER) {
+		// Area is the slider rectangle where EuroScope has dragged it to. Map its top
+		// back to a first row and rebuild the list there, the same way the arrows do.
+		string s(sObjectId), win, lbid;
+		string::size_type pos = s.find(" ");
+		if (pos != s.npos) { win = s.substr(0, pos); lbid = s.substr(pos + 1); }
+		auto window = GetAppWindowFromObjectId(win);
+		if (window == nullptr) { return; }
+		SListBox* lb = window->GetListBox(atoi(lbid.c_str()));
+		if (lb == nullptr) { return; }
+
+		lb->m_LB_firstElem_idx = lb->FirstRowForSliderTop(Area.top);
+		lb->listBox_.clear();
+		if (window->m_winType == WINDOW_ALTITUDE) {
+			lb->PopulateRowsListBox(SituAltitude::ListRows(), window->m_width);
+		}
+		else {
+			lb->PopulateDirectListBox(&mAcData[window->m_callsign].acFPRoute, GetPlugIn()->FlightPlanSelect(window->m_callsign.c_str()));
+		}
+		RequestRefresh();
 	}
 }
 

@@ -13,6 +13,7 @@ public:
 	static CFont EuroscopeFixed14;
 	static CFont Segoe12;
 	static CFont Segoe14;
+	static CFont Segoe16;
 
 	static void CreateFonts(); 
 	static void DeleteFonts();

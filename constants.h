@@ -179,6 +179,7 @@ const int WINDOW_FREE_TEXT = 6010;
 const int WINDOW_CPDLC = 6011;
 const int WINDOW_CPDLC_EDITOR = 6012;
 const int WINDOW_ALTITUDE = 6013;
+const int WINDOW_SCROLL_SLIDER = 6014;
 
 // Text fields
 // A text field with no type is a plain single-line editable field, which is what every
