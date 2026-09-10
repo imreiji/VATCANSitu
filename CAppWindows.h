@@ -80,9 +80,16 @@ struct SListBoxScrollBar {
 		slider.left = m_origin.x +1;
 		slider.right = m_origin.x + m_width -1;
 
-		int deltay = static_cast<int>(((downarrow.top - uparrow.bottom) - ((downarrow.top - uparrow.bottom) * m_max_elements / (m_total_elements))) / (m_clicks - 1));
-		slider.top = uparrow.bottom + deltay* m_slider_location;
-		slider.bottom = slider.top + static_cast<int>(round((downarrow.top - uparrow.bottom)*m_max_elements/(m_total_elements)));
+		// Slider height is the visible fraction of the track; its top is the scrolled
+		// fraction of the remaining travel. Both in floating point: the old integer
+		// per-click step truncated 1.9 px to 1, so a list scrolled to its last row showed
+		// the slider only halfway down.
+		const double trackHeight = (double)(downarrow.top - uparrow.bottom);
+		const int sliderHeight = (int)round(trackHeight * m_max_elements / (double)m_total_elements);
+		const double travel = trackHeight - sliderHeight;
+		const int steps = m_clicks - 1;
+		slider.top = uparrow.bottom + (steps > 0 ? (int)round(travel * m_slider_location / (double)steps) : 0);
+		slider.bottom = slider.top + sliderHeight;
 		track = { m_origin.x, uparrow.bottom, m_origin.x + m_width, downarrow.top };
 
 		dc->MoveTo({ uparrow.left + 1, uparrow.bottom - 3 });

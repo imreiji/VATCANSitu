@@ -3347,7 +3347,7 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 		lb->ScrollUp();
 		lb->listBox_.clear();
 		if (window->m_winType == WINDOW_ALTITUDE) {
-			lb->PopulateRowsListBox(SituAltitude::ListRows(), window->m_width);
+			lb->PopulateRowsListBox(SituAltitude::ListRows(), ALT_WINDOW_LIST_ELEMENT_WIDTH);
 		}
 		else {
 			lb->PopulateDirectListBox(&mAcData[window->m_callsign].acFPRoute, GetPlugIn()->FlightPlanSelect(window->m_callsign.c_str()));
@@ -3364,7 +3364,7 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 		lb->ScrollDown();
 		lb->listBox_.clear();
 		if (window->m_winType == WINDOW_ALTITUDE) {
-			lb->PopulateRowsListBox(SituAltitude::ListRows(), window->m_width);
+			lb->PopulateRowsListBox(SituAltitude::ListRows(), ALT_WINDOW_LIST_ELEMENT_WIDTH);
 		}
 		else {
 			lb->PopulateDirectListBox(&mAcData[window->m_callsign].acFPRoute, GetPlugIn()->FlightPlanSelect(window->m_callsign.c_str()));
@@ -4756,7 +4756,7 @@ void CSiTRadar::OnMoveScreenObject(int ObjectType, const char* sObjectId, POINT 
 		lb->m_LB_firstElem_idx = lb->FirstRowForSliderTop(Area.top);
 		lb->listBox_.clear();
 		if (window->m_winType == WINDOW_ALTITUDE) {
-			lb->PopulateRowsListBox(SituAltitude::ListRows(), window->m_width);
+			lb->PopulateRowsListBox(SituAltitude::ListRows(), ALT_WINDOW_LIST_ELEMENT_WIDTH);
 		}
 		else {
 			lb->PopulateDirectListBox(&mAcData[window->m_callsign].acFPRoute, GetPlugIn()->FlightPlanSelect(window->m_callsign.c_str()));

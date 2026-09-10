@@ -369,7 +369,7 @@ CAppWindows::CAppWindows(POINT origin, int winType, CFlightPlan fp, RECT radarea
 		// a seven-row level list, the typed entry, Block, Pref, WW, Submit. Ground,
 		// Block, Pref and WW are drawn dim and answer nothing yet.
 		windowTitle = "Alt";
-		m_width = 76;
+		m_width = ALT_WINDOW_WIDTH;
 		m_height = 370;
 
 		// Callsign and mode centred across the window; the mode reads a size larger.
@@ -386,7 +386,7 @@ CAppWindows::CAppWindows(POINT origin, int winType, CFlightPlan fp, RECT radarea
 
 		SWindowButton b;
 		b.windowID = m_windowId_;
-		b.m_width = 64;
+		b.m_width = 44;
 		b.m_height = 20;
 
 		b.location = { 6, 60 };
@@ -435,13 +435,13 @@ CAppWindows::CAppWindows(POINT origin, int winType, CFlightPlan fp, RECT radarea
 		lb.selectItem = rows[selected];
 		lb.m_LB_firstElem_idx = SituAltitude::FirstVisibleRow(selected, lb.m_max_elements, (int)rows.size());
 		lb.m_origin = m_origin;
-		lb.PopulateRowsListBox(rows, m_width);
+		lb.PopulateRowsListBox(rows, ALT_WINDOW_LIST_ELEMENT_WIDTH);
 		m_listboxes_.emplace_back(lb);
 
 		STextField entry;
 		entry.m_location_ = { 6, 252 };
 		entry.m_height = 19;
-		entry.m_width = 44;
+		entry.m_width = 34;
 		entry.m_text = SituAltitude::EntryFor(cleared);
 		entry.m_parentWindowID = m_windowId_;
 		m_textfields_.push_back(entry);
