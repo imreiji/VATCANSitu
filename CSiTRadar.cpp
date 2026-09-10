@@ -2817,13 +2817,20 @@ void CSiTRadar::OpenAltitudeWindow(CFlightPlan fp, POINT at)
 	if (!fp.IsValid()) { return; }
 	const std::string callsign = fp.GetCallsign();
 
-	// One per aircraft: a second request moves the existing window to the mouse.
-	for (auto& win : menuState.radarScrWindows) {
-		if (win.second.m_winType == WINDOW_ALTITUDE && win.second.m_callsign == callsign) {
-			win.second.m_origin = at;
+	// One on the scope at a time. A request for the same aircraft moves the open window
+	// to the mouse; a request for a different aircraft closes the open one first, so two
+	// clearances are never in flight side by side.
+	for (auto it = menuState.radarScrWindows.begin(); it != menuState.radarScrWindows.end(); ) {
+		if (it->second.m_winType != WINDOW_ALTITUDE) { ++it; continue; }
+		if (it->second.m_callsign == callsign) {
+			it->second.m_origin = at;
 			RequestRefresh();
 			return;
 		}
+		if (menuState.focusedItem.m_window_id == it->second.m_windowId_) {
+			menuState.focusedItem.m_focus_on = false;
+		}
+		it = menuState.radarScrWindows.erase(it);
 	}
 
 	CAppWindows alt(at, WINDOW_ALTITUDE, fp, GetRadarArea());
