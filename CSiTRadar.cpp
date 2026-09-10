@@ -3,6 +3,7 @@
 #include "PositionString.h"
 #include "CpdlcUplinks.h"
 #include "TagCallsign.h"
+#include "AltitudeEntry.h"
 
 using namespace Gdiplus;
 
@@ -2807,6 +2808,111 @@ void CSiTRadar::CloseCPDLCEditor(const std::string& callsign)
 	}
 }
 
+void CSiTRadar::OpenAltitudeWindow(CFlightPlan fp, POINT at)
+{
+	if (!fp.IsValid()) { return; }
+	const std::string callsign = fp.GetCallsign();
+
+	// One per aircraft: a second request moves the existing window to the mouse.
+	for (auto& win : menuState.radarScrWindows) {
+		if (win.second.m_winType == WINDOW_ALTITUDE && win.second.m_callsign == callsign) {
+			win.second.m_origin = at;
+			RequestRefresh();
+			return;
+		}
+	}
+
+	CAppWindows alt(at, WINDOW_ALTITUDE, fp, GetRadarArea());
+
+	// CPDLC starts lit when there is a connection to send on; the button can be
+	// toggled either way while logged on, and stays dim and inert when not.
+	const bool canSend = menuState.CPDLCOn;
+	const bool connected = mAcData[callsign].cpdlcState == CPDLC_CONNECTED;
+	alt.m_cpdlcLit = false;
+	if (canSend && connected) { ToggleAltitudeCpdlc(alt); }
+
+	ClearFocusedTextFields();
+	menuState.radarScrWindows[alt.m_windowId_] = alt;
+	CAppWindows& placed = menuState.radarScrWindows[alt.m_windowId_];
+	if (!placed.m_textfields_.empty()) {
+		placed.m_textfields_.front().m_focused = true;
+		SetFocusedTextField(placed.m_windowId_, placed.m_textfields_.front().m_textFieldID);
+	}
+	RequestRefresh();
+}
+
+void CSiTRadar::ToggleAltitudeCpdlc(CAppWindows& window)
+{
+	if (!menuState.CPDLCOn) { return; }
+	window.m_cpdlcLit = !window.m_cpdlcLit;
+	for (auto& button : window.m_buttons_) {
+		if (button.text == "CPDLC") {
+			button.m_textcolor = window.m_cpdlcLit ? C_CPDLC_GREEN : C_MENU_GREY4;
+		}
+	}
+}
+
+bool CSiTRadar::SubmitAltitudeWindow(int windowId)
+{
+	CAppWindows* window = GetAppWindow(windowId);
+	if (window == nullptr || window->m_textfields_.empty()) { return false; }
+
+	const std::string callsign = window->m_callsign;
+	const std::string typed = window->m_textfields_.front().m_text;
+	const SituAltitude::Entry entry = SituAltitude::Parse(typed);
+	if (!entry.ok) {
+		const std::string msg = callsign + ": '" + typed + "' is not an altitude - three digits, CA, VA or CLR";
+		GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Alt", msg.c_str(), true, true, false, false, false);
+		SituLog::Warn("Alt", msg);
+		return false;
+	}
+
+	CFlightPlan fp = GetPlugIn()->FlightPlanSelect(callsign.c_str());
+	if (!fp.IsValid()) {
+		CloseWindow(windowId);
+		menuState.focusedItem.m_focus_on = false;
+		return false;
+	}
+
+	const bool lit = window->m_cpdlcLit;
+	const int was = fp.GetControllerAssignedData().GetClearedAltitude();
+
+	fp.GetControllerAssignedData().SetClearedAltitude(entry.clearedAltitude);
+	SituLog::Line("ES>", "CFL", SituLog::Fields()
+		.Add("callsign", callsign).Add("was", was).Add("now", entry.clearedAltitude)
+		.Add("entry", typed).Add("cpdlc", lit).Add("via", "alt-window"));
+
+	// The window is closed before anything that might redraw. `window` is dangling
+	// from here on.
+	CloseWindow(windowId);
+	menuState.focusedItem.m_focus_on = false;
+
+	if (lit) {
+		int currentFt = 0;
+		if (fp.GetCorrelatedRadarTarget().IsValid()) {
+			currentFt = fp.GetCorrelatedRadarTarget().GetPosition().GetPressureAltitude();
+		}
+		const SituAltitude::Uplink direction = SituAltitude::UplinkFor(entry.clearedAltitude, currentFt);
+		if (direction == SituAltitude::Uplink::None) {
+			const std::string msg = callsign + ": clearance set; nothing to uplink for " + (typed.empty() ? std::string("CLR") : typed);
+			GetPlugIn()->DisplayUserMessage("VATCAN Situ", "Alt", msg.c_str(), true, true, false, false, false);
+			SituLog::Warn("Alt", msg);
+		}
+		else {
+			CPDLCMessage uplink = NewCPDLCUplink(callsign);
+			uplink.opensMnemonic = true;
+			uplink.responseRequired = "WU";
+			uplink.rawMessageContent = (direction == SituAltitude::Uplink::Climb)
+				? SituCpdlcUplinks::ClimbTo(entry.clearedAltitude)
+				: SituCpdlcUplinks::DescendTo(entry.clearedAltitude);
+			DispatchCPDLCUplink(uplink, callsign);
+		}
+	}
+
+	RequestRefresh();
+	return true;
+}
+
 void CSiTRadar::OpenCPDLCEditor(const std::string& callsign, POINT at)
 {
 	// One editor per aircraft. A second click moves the one that is open rather than
@@ -3236,7 +3342,12 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 
 		lb->ScrollUp();
 		lb->listBox_.clear();
-		lb->PopulateDirectListBox(&mAcData[window->m_callsign].acFPRoute, GetPlugIn()->FlightPlanSelect(window->m_callsign.c_str()));
+		if (window->m_winType == WINDOW_ALTITUDE) {
+			lb->PopulateRowsListBox(SituAltitude::ListRows(), window->m_width);
+		}
+		else {
+			lb->PopulateDirectListBox(&mAcData[window->m_callsign].acFPRoute, GetPlugIn()->FlightPlanSelect(window->m_callsign.c_str()));
+		}
 		RequestRefresh();
 	}
 
@@ -3248,7 +3359,12 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 
 		lb->ScrollDown();
 		lb->listBox_.clear();
-		lb->PopulateDirectListBox(&mAcData[window->m_callsign].acFPRoute, GetPlugIn()->FlightPlanSelect(window->m_callsign.c_str()));
+		if (window->m_winType == WINDOW_ALTITUDE) {
+			lb->PopulateRowsListBox(SituAltitude::ListRows(), window->m_width);
+		}
+		else {
+			lb->PopulateDirectListBox(&mAcData[window->m_callsign].acFPRoute, GetPlugIn()->FlightPlanSelect(window->m_callsign.c_str()));
+		}
 		RequestRefresh();
 	}
 
@@ -3364,6 +3480,21 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 		if (!strcmp(func.c_str(), "Cancel")) {
 			menuState.radarScrWindows.erase(stoi(id));
 		}
+	}
+
+	if (ObjectType == WINDOW_ALTITUDE) {
+		auto window = GetAppWindowFromObjectId(id);
+		if (window == nullptr) { return; }
+
+		if (func == "Submit") {
+			SubmitAltitudeWindow(window->m_windowId_);
+		}
+		else if (func == "CPDLC") {
+			ToggleAltitudeCpdlc(*window);
+		}
+		// Ground, Block, Pref and WW are drawn for fidelity and do nothing yet.
+		RequestRefresh();
+		return;
 	}
 
 	if (ObjectType == WINDOW_DIRECT_TO) {
@@ -3627,6 +3758,12 @@ void CSiTRadar::OnClickScreenObject(int ObjectType,
 					lelem.m_selected_ = false;
 				}
 			}
+		}
+
+		if (window->m_winType == WINDOW_ALTITUDE && !window->m_textfields_.empty()) {
+			// Picking a row is the same as typing it. CLR clears the field, matching
+			// what an empty field means on Submit.
+			window->m_textfields_.front().m_text = (le_text == "CLR") ? "" : le_text;
 		}
 
 		if (window->m_winType == WINDOW_DIRECT_TO) {
@@ -4331,9 +4468,12 @@ void CSiTRadar::OnButtonDownScreenObject(int ObjectType,
 	}
 
 	if (ObjectType == TAG_ITEM_TYPE_ALTITUDE) {
-		if (Button == BUTTON_RIGHT) {		
+		if (Button == BUTTON_RIGHT) {
+			// The plugin's own Alt window, in place of EuroScope's cleared-altitude
+			// popup (TAG_ITEM_FUNCTION_TEMP_ALTITUDE_POPUP). Same field written at the
+			// end, so the tag and everything downstream see no difference.
 			GetPlugIn()->SetASELAircraft(GetPlugIn()->FlightPlanSelect(sObjectId));
-			StartTagFunction(sObjectId, NULL, TAG_ITEM_TYPE_ALTITUDE, sObjectId, NULL, TAG_ITEM_FUNCTION_TEMP_ALTITUDE_POPUP, Pt, Area);
+			OpenAltitudeWindow(GetPlugIn()->FlightPlanSelect(sObjectId), Pt);
 		}
 
 		if (Button == BUTTON_LEFT) {

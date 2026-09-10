@@ -93,6 +93,8 @@ jobs:
         testbin\TagCallsignTests.exe || exit /b 1
         cl /nologo /EHsc /W4 /std:c++17 tests\SituLogTests.cpp /Fe:testbin\SituLogTests.exe /Fo:testbin\ || exit /b 1
         testbin\SituLogTests.exe || exit /b 1
+        cl /nologo /EHsc /W4 /std:c++17 tests\AltitudeEntryTests.cpp /Fe:testbin\AltitudeEntryTests.exe /Fo:testbin\ || exit /b 1
+        testbin\AltitudeEntryTests.exe || exit /b 1
 
     - name: Build artifact from source
       run: msbuild "${env:GITHUB_WORKSPACE}\VATCANSitu.vcxproj"

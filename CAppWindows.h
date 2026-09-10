@@ -271,6 +271,37 @@ struct SListBox {
 			m_scrbar = scrollBar;
 		}
 	}
+	// A plain list of strings shown through a window of m_max_elements rows starting at
+	// m_LB_firstElem_idx, with a scroll bar when there are more rows than fit. The
+	// general form of PopulateDirectListBox, which is tied to a route. The row matching
+	// selectItem stays highlighted across scrolls.
+	void PopulateRowsListBox(const std::vector<string>& rows, int elementWidth) {
+		listBox_.clear();
+		m_nearestPtIdx = 0;
+		m_height = 0;
+		m_last_element = (int)rows.size();
+		int j = 0;
+		for (int i = m_LB_firstElem_idx; i < (int)rows.size() && j < m_max_elements; i++, j++) {
+			SListBoxElement lbe(elementWidth, rows[i]);
+			if (rows[i] == selectItem) { lbe.m_selected_ = true; }
+			listBox_.emplace_back(lbe);
+			m_height += lbe.m_height;
+		}
+		while (j < m_max_elements) {
+			SListBoxElement lbe(elementWidth, "");
+			listBox_.emplace_back(lbe);
+			m_height += lbe.m_height;
+			j++;
+		}
+		if ((int)rows.size() > m_max_elements) {
+			m_has_scroll_bar = true;
+			SListBoxScrollBar scrollBar(m_height, 10, m_ListBoxID, m_origin, m_LB_firstElem_idx, ((int)rows.size() - m_max_elements) + 1);
+			scrollBar.m_height = m_height;
+			scrollBar.m_slider_height_ratio = (double)m_max_elements / (double)rows.size();
+			scrollBar.m_total_elements = (int)rows.size();
+			m_scrbar = scrollBar;
+		}
+	}
 	void RenderListBox(int firstElem, int numElem, int maxElements, POINT winOrigin);
 
 	// One drawn row of a CPDLC list: the message it shows, whether it is a reply drawn
@@ -363,6 +394,9 @@ public:
 	int m_width{ 200 };
 	int m_height{ 200 };
 	string m_callsign{};
+	// Alt window only: whether Submit also sends the clearance by CPDLC. Drives the
+	// CPDLC button's bright/dim text.
+	bool m_cpdlcLit{ false };
 	POINT m_origin;
 	string windowTitle;
 	bool m_visible_;

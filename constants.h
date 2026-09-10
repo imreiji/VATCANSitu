@@ -53,6 +53,7 @@ const int TAG_CPDLC_MNEMONIC = 405;
 // rather than here.
 const int TAG_ITEM_CPDLC = 4999;
 const int TAG_FUNCTION_OPEN_CPDLC_WINDOW = 5003;
+const int TAG_FUNCTION_OPEN_ALT_WINDOW = 5004;
 
 const int BUTTON_MENU = 201;
 const int BUTTON_MENU_HALO_OPTIONS = 202;
@@ -177,6 +178,7 @@ const int WINDOW_SCROLL_ARROW_DOWN = 6009;
 const int WINDOW_FREE_TEXT = 6010;
 const int WINDOW_CPDLC = 6011;
 const int WINDOW_CPDLC_EDITOR = 6012;
+const int WINDOW_ALTITUDE = 6013;
 
 // Text fields
 // A text field with no type is a plain single-line editable field, which is what every

@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "CAppWindows.h"
+#include "AltitudeEntry.h"
 
 unsigned long CAppWindows::windowIDs_ = 0;
 unsigned long SListBoxElement::m_elementIDcount = 0;
@@ -363,6 +364,83 @@ CAppWindows::CAppWindows(POINT origin, int winType, CFlightPlan fp, RECT radarea
 
 	}
 
+	if (winType == WINDOW_ALTITUDE) {
+		// The CanScope Alt window, top to bottom: callsign and mode, CPDLC and Ground,
+		// a seven-row level list, the typed entry, Block, Pref, WW, Submit. Ground,
+		// Block, Pref and WW are drawn dim and answer nothing yet.
+		windowTitle = "Alt";
+		m_width = 96;
+		m_height = 366;
+
+		SWindowText t;
+		t.text = m_callsign;
+		t.location = { 6, 27 };
+		m_text_.push_back(t);
+		t.text = "Cleared";
+		t.location = { 6, 41 };
+		m_text_.push_back(t);
+
+		SWindowButton b;
+		b.windowID = m_windowId_;
+		b.m_width = 84;
+		b.m_height = 20;
+
+		b.location = { 6, 56 };
+		b.text = "CPDLC";
+		b.m_textcolor = C_MENU_GREY4;   // dim until the opener lights it
+		m_buttons_.push_back(b);
+
+		b.location = { 6, 78 };
+		b.text = "Ground";
+		b.m_textcolor = C_MENU_GREY4;
+		m_buttons_.push_back(b);
+
+		b.location = { 6, 270 };
+		b.text = "Block";
+		m_buttons_.push_back(b);
+
+		b.location = { 6, 292 };
+		b.text = "Pref >";
+		m_buttons_.push_back(b);
+
+		b.location = { 6, 314 };
+		b.text = "WW >";
+		m_buttons_.push_back(b);
+
+		b.location = { 6, 338 };
+		b.m_height = 22;
+		b.text = "Submit";
+		b.m_textcolor = C_CPDLC_GREEN;
+		m_buttons_.push_back(b);
+
+		// The list opens with the cleared level highlighted and centred, or the
+		// aircraft's current level when nothing is cleared.
+		const int cleared = fp.GetControllerAssignedData().GetClearedAltitude();
+		int currentFt = 0;
+		if (fp.GetCorrelatedRadarTarget().IsValid()) {
+			currentFt = fp.GetCorrelatedRadarTarget().GetPosition().GetPressureAltitude();
+		}
+		const std::vector<string> rows = SituAltitude::ListRows();
+		const int selected = SituAltitude::RowFor(cleared, currentFt);
+
+		SListBox lb;
+		lb.m_max_elements = SituAltitude::kVisibleRows;
+		lb.m_windowID_ = m_windowId_;
+		lb.selectItem = rows[selected];
+		lb.m_LB_firstElem_idx = SituAltitude::FirstVisibleRow(selected, lb.m_max_elements, (int)rows.size());
+		lb.m_origin = m_origin;
+		lb.PopulateRowsListBox(rows, m_width);
+		m_listboxes_.emplace_back(lb);
+
+		STextField entry;
+		entry.m_location_ = { 6, 248 };
+		entry.m_height = 19;
+		entry.m_width = 50;
+		entry.m_text = SituAltitude::EntryFor(cleared);
+		entry.m_parentWindowID = m_windowId_;
+		m_textfields_.push_back(entry);
+	}
+
 	if (winType == WINDOW_POINT_OUT) {
 		windowTitle = "Point Out";
 		m_height = 85;
@@ -454,6 +532,12 @@ SWindowElements CAppWindows::DrawWindow(CDC* dc) {
 	}
 	if (m_winType == WINDOW_DIRECT_TO) {
 		listboxDeltaX = -10;
+	}
+	if (m_winType == WINDOW_ALTITUDE) {
+		// Same inset as Direct To; the list sits below the callsign and the two
+		// buttons above it.
+		listboxDeltaX = -10;
+		listboxDeltaY = 76;
 	}
 	const bool cpdlcList = (m_winType == WINDOW_CPDLC || m_winType == WINDOW_CPDLC_EDITOR);
 	// The scroll bar hangs off the right edge of the list. The CPDLC list is inset by

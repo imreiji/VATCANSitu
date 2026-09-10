@@ -194,6 +194,14 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
                     CSiTRadar::m_pRadScr->RequestRefresh();
                     return -1;
                 }
+                if (parentWin->m_winType == WINDOW_ALTITUDE) {
+                    // Submit closes the window on success, which destroys parentWin and
+                    // focusedField; nothing below may touch them. On a bad entry the
+                    // window stays open with the text still in the field.
+                    static_cast<CSiTRadar*>(CSiTRadar::m_pRadScr)->SubmitAltitudeWindow(parentWin->m_windowId_);
+                    CSiTRadar::m_pRadScr->RequestRefresh();
+                    return -1;
+                }
                 if (parentWin->m_winType == WINDOW_CTRL_REMARKS) {
 
                     CSiTRadar::ModifyCtrlRemarks(focusedField->m_text.c_str(), CSiTRadar::m_pRadScr->GetPlugIn()->FlightPlanSelect(parentWin->m_callsign.c_str()));
@@ -280,6 +288,16 @@ LRESULT CALLBACK KeyboardProc(int nCode, WPARAM wParam, LPARAM lParam) {
             case VK_ESCAPE: {
                 
                 if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) {
+                    {
+                        // An Alt window with the focused field closes without applying.
+                        CAppWindows* altWin = CSiTRadar::GetAppWindow(CSiTRadar::menuState.focusedItem.m_window_id);
+                        if (altWin != nullptr && altWin->m_winType == WINDOW_ALTITUDE && CSiTRadar::menuState.focusedItem.m_focus_on) {
+                            CSiTRadar::CloseWindow(altWin->m_windowId_);
+                            CSiTRadar::menuState.focusedItem.m_focus_on = false;
+                            CSiTRadar::m_pRadScr->RequestRefresh();
+                            return 0;
+                        }
+                    }
                     if (CSiTRadar::menuState.handoffMode == TRUE  
                         || CSiTRadar::menuState.SFIMode == TRUE) {
                         
@@ -650,6 +668,7 @@ SituPlugin::SituPlugin()
     RegisterTagItemFunction("Request IFR Release", TAG_FUNC_IFR_REL_REQ);
     RegisterTagItemFunction("Grant IFR Release", TAG_FUNC_IFR_RELEASED);
     RegisterTagItemFunction("Open CPDLC Menu", TAG_FUNCTION_OPEN_CPDLC_WINDOW);
+    RegisterTagItemFunction("Open Altitude Window", TAG_FUNCTION_OPEN_ALT_WINDOW);
 
     DWORD appProc = GetCurrentThreadId();
     appHook = SetWindowsHookEx(WH_KEYBOARD, KeyboardProc, NULL, appProc);
@@ -737,6 +756,11 @@ inline void SituPlugin::OnFunctionCall(int FunctionId, const char* sItemString, 
         .Add("id", FunctionId).Add("item", sItemString).Add("callsign", fp.IsValid() ? fp.GetCallsign() : "")
         .Add("where", "plugin"));
 
+    if (FunctionId == TAG_FUNCTION_OPEN_ALT_WINDOW) {
+        if (!fp.IsValid() || CSiTRadar::m_pRadScr == nullptr) { return; }
+        static_cast<CSiTRadar*>(CSiTRadar::m_pRadScr)->OpenAltitudeWindow(fp, Pt);
+        return;
+    }
     if (FunctionId == TAG_FUNCTION_OPEN_CPDLC_WINDOW) {
 
         // Nothing to open a window against, and GetCallsign on an invalid plan has
