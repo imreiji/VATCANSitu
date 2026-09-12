@@ -16,6 +16,10 @@ struct SWindowElements {
 struct SWindowText {
 	POINT location;
 	string text;
+	// When width is set the text is centred in [location.x, location.x + width) instead
+	// of starting at location.x. font null means Segoe14.
+	int width{ 0 };
+	CFont* font{ nullptr };
 	void RenderText(CDC* m_dc, POINT origin);
 };
 
@@ -31,6 +35,10 @@ struct SListBoxScrollBar {
 	int m_clicks;
 	RECT uparrow;
 	RECT downarrow;
+	// The slider as last drawn and the track between the arrows it can move in, so the
+	// slider can be registered as a draggable object and a drop mapped back to a row.
+	RECT slider{ 0, 0, 0, 0 };
+	RECT track{ 0, 0, 0, 0 };
 	POINT m_origin;
 	SListBoxScrollBar() {}
 
@@ -53,7 +61,6 @@ struct SListBoxScrollBar {
 		dc->SelectObject(targetBrush);
 
 		RECT scrollbar;
-		RECT slider;
 
 		scrollbar.top = m_origin.y;
 		scrollbar.bottom = m_origin.y + m_height;
@@ -73,9 +80,17 @@ struct SListBoxScrollBar {
 		slider.left = m_origin.x +1;
 		slider.right = m_origin.x + m_width -1;
 
-		int deltay = static_cast<int>(((downarrow.top - uparrow.bottom) - ((downarrow.top - uparrow.bottom) * m_max_elements / (m_total_elements))) / (m_clicks - 1));
-		slider.top = uparrow.bottom + deltay* m_slider_location;
-		slider.bottom = slider.top + static_cast<int>(round((downarrow.top - uparrow.bottom)*m_max_elements/(m_total_elements)));
+		// Slider height is the visible fraction of the track; its top is the scrolled
+		// fraction of the remaining travel. Both in floating point: the old integer
+		// per-click step truncated 1.9 px to 1, so a list scrolled to its last row showed
+		// the slider only halfway down.
+		const double trackHeight = (double)(downarrow.top - uparrow.bottom);
+		const int sliderHeight = (int)round(trackHeight * m_max_elements / (double)m_total_elements);
+		const double travel = trackHeight - sliderHeight;
+		const int steps = m_clicks - 1;
+		slider.top = uparrow.bottom + (steps > 0 ? (int)round(travel * m_slider_location / (double)steps) : 0);
+		slider.bottom = slider.top + sliderHeight;
+		track = { m_origin.x, uparrow.bottom, m_origin.x + m_width, downarrow.top };
 
 		dc->MoveTo({ uparrow.left + 1, uparrow.bottom - 3 });
 		dc->LineTo({ uparrow.left + 4, uparrow.top + 2 });
@@ -271,6 +286,37 @@ struct SListBox {
 			m_scrbar = scrollBar;
 		}
 	}
+	// A plain list of strings shown through a window of m_max_elements rows starting at
+	// m_LB_firstElem_idx, with a scroll bar when there are more rows than fit. The
+	// general form of PopulateDirectListBox, which is tied to a route. The row matching
+	// selectItem stays highlighted across scrolls.
+	void PopulateRowsListBox(const std::vector<string>& rows, int elementWidth) {
+		listBox_.clear();
+		m_nearestPtIdx = 0;
+		m_height = 0;
+		m_last_element = (int)rows.size();
+		int j = 0;
+		for (int i = m_LB_firstElem_idx; i < (int)rows.size() && j < m_max_elements; i++, j++) {
+			SListBoxElement lbe(elementWidth, rows[i]);
+			if (rows[i] == selectItem) { lbe.m_selected_ = true; }
+			listBox_.emplace_back(lbe);
+			m_height += lbe.m_height;
+		}
+		while (j < m_max_elements) {
+			SListBoxElement lbe(elementWidth, "");
+			listBox_.emplace_back(lbe);
+			m_height += lbe.m_height;
+			j++;
+		}
+		if ((int)rows.size() > m_max_elements) {
+			m_has_scroll_bar = true;
+			SListBoxScrollBar scrollBar(m_height, 10, m_ListBoxID, m_origin, m_LB_firstElem_idx, ((int)rows.size() - m_max_elements) + 1);
+			scrollBar.m_height = m_height;
+			scrollBar.m_slider_height_ratio = (double)m_max_elements / (double)rows.size();
+			scrollBar.m_total_elements = (int)rows.size();
+			m_scrbar = scrollBar;
+		}
+	}
 	void RenderListBox(int firstElem, int numElem, int maxElements, POINT winOrigin);
 
 	// One drawn row of a CPDLC list: the message it shows, whether it is a reply drawn
@@ -284,6 +330,20 @@ struct SListBox {
 	};
 	std::vector<CPDLCRow> FlattenCPDLCRows();
 	void RenderCPDLCListBox(POINT winOrigin);
+	// The first row for a slider whose top edge was dropped at sliderTop, clamped to the
+	// range the arrows can reach. The slider's own height is excluded from the travel so
+	// the bottom of the list is reachable.
+	int FirstRowForSliderTop(int sliderTop) const {
+		const int total = m_last_element - m_nearestPtIdx;
+		const int maxFirst = total - m_max_elements;
+		if (maxFirst <= 0) { return 0; }
+		const int travel = (m_scrbar.track.bottom - m_scrbar.track.top) - (m_scrbar.slider.bottom - m_scrbar.slider.top);
+		if (travel <= 0) { return 0; }
+		int first = (int)((double)(sliderTop - m_scrbar.track.top) / (double)travel * (double)maxFirst + 0.5);
+		if (first < 0) { first = 0; }
+		if (first > maxFirst) { first = maxFirst; }
+		return first;
+	}
 	void ScrollUp() {
 		if (m_LB_firstElem_idx > 0) {
 			m_LB_firstElem_idx--;
@@ -315,6 +375,7 @@ struct SWindowButton {
 	RECT m_WindowButtonRect;
 	CDC* m_dc;
 	COLORREF m_textcolor{ C_MENU_TEXT_WHITE };
+	COLORREF m_fillcolor{ C_MENU_GREY3 };
 
 	SWindowButton() {}
 	
@@ -331,8 +392,8 @@ struct SWindowButton {
 		m_dc->SetTextColor(m_textcolor);
 
 		HPEN targetPen = CreatePen(PS_SOLID, 1, C_MENU_GREY1);
-		HBRUSH targetBrush = CreateSolidBrush(C_MENU_GREY3);
-		HBRUSH tb2 = CreateSolidBrush(C_MENU_GREY3);
+		HBRUSH targetBrush = CreateSolidBrush(m_fillcolor);
+		HBRUSH tb2 = CreateSolidBrush(m_fillcolor);
 
 		m_dc->SelectObject(targetPen);
 		m_dc->SelectObject(targetBrush);
@@ -363,6 +424,9 @@ public:
 	int m_width{ 200 };
 	int m_height{ 200 };
 	string m_callsign{};
+	// Alt window only: whether Submit also sends the clearance by CPDLC. Drives the
+	// CPDLC button's bright/dim text.
+	bool m_cpdlcLit{ false };
 	POINT m_origin;
 	string windowTitle;
 	bool m_visible_;

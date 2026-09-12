@@ -93,6 +93,15 @@ https://vimeo.com/443838489
 
 Not implemented for now: There are some sham buttons just to replicate the UI (also I don't know what some of them do in the real system). RBL default ES tools work well, unlikely will be a priority.
 
+# Altitude window
+
+Right-click the altitude on a tag (or bind the "Open Altitude Window" tag function) to open
+the CanScope-style Alt window in place of EuroScope's cleared-altitude popup: a scrolling
+level list from 600 down to 010 with CA, VA and CLR at the bottom, a typed field, and
+Submit. Enter submits, Escape closes without applying. When the CPDLC button is lit and
+the aircraft is connected, Submit also sends CLIMB TO AND MAINTAIN or DESCEND TO AND
+MAINTAIN for the new level. Ground, Block, Pref and WW are drawn but not yet wired.
+
 # Debug log
 
 Type in the EuroScope command line:

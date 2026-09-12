@@ -505,6 +505,19 @@ public:
         const char* sSenderController,
         const char* sTargetController);
 
+
+    // The Alt window, which replaces EuroScope's cleared-altitude popup. Opened from the
+    // tag's altitude field and from the registered tag function; one per aircraft.
+    void OpenAltitudeWindow(CFlightPlan fp, POINT at);
+    // Applies the window's entry as the cleared altitude, sends the CPDLC clearance too
+    // when the window's CPDLC toggle is lit, and closes the window. Returns false and
+    // leaves the window open when the entry does not parse.
+    bool SubmitAltitudeWindow(int windowId);
+    // Flips the CPDLC toggle and recolours its button.
+    void ToggleAltitudeCpdlc(CAppWindows& window);
+    // Closes every open Alt window without applying, and drops keyboard focus if it was there.
+    void CloseAltitudeWindows();
+
 protected:
     void ButtonToScreen(CSiTRadar* radscr, const RECT& rect, const string& btext, int itemtype);
     void DrawACList(POINT p, CDC* dc, unordered_map<string, ACData>& ac, int listType);

@@ -53,6 +53,7 @@ const int TAG_CPDLC_MNEMONIC = 405;
 // rather than here.
 const int TAG_ITEM_CPDLC = 4999;
 const int TAG_FUNCTION_OPEN_CPDLC_WINDOW = 5003;
+const int TAG_FUNCTION_OPEN_ALT_WINDOW = 5004;
 
 const int BUTTON_MENU = 201;
 const int BUTTON_MENU_HALO_OPTIONS = 202;
@@ -177,6 +178,14 @@ const int WINDOW_SCROLL_ARROW_DOWN = 6009;
 const int WINDOW_FREE_TEXT = 6010;
 const int WINDOW_CPDLC = 6011;
 const int WINDOW_CPDLC_EDITOR = 6012;
+const int WINDOW_ALTITUDE = 6013;
+const int WINDOW_SCROLL_SLIDER = 6014;
+
+// Alt window geometry. The list element width is not the window width: RenderListBox
+// insets 16 px each side and the window shifts its list 10 px left, so 66 draws the box
+// from x+6 to x+40 and puts the scroll bar at x+43 inside a 56 px window.
+const int ALT_WINDOW_WIDTH = 56;
+const int ALT_WINDOW_LIST_ELEMENT_WIDTH = 66;
 
 // Text fields
 // A text field with no type is a plain single-line editable field, which is what every

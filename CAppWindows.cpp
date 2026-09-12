@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "CAppWindows.h"
+#include "AltitudeEntry.h"
 
 unsigned long CAppWindows::windowIDs_ = 0;
 unsigned long SListBoxElement::m_elementIDcount = 0;
@@ -363,6 +364,89 @@ CAppWindows::CAppWindows(POINT origin, int winType, CFlightPlan fp, RECT radarea
 
 	}
 
+	if (winType == WINDOW_ALTITUDE) {
+		// The CanScope Alt window, top to bottom: callsign and mode, CPDLC and Ground,
+		// a seven-row level list, the typed entry, Block, Pref, WW, Submit. Ground,
+		// Block, Pref and WW are drawn dim and answer nothing yet.
+		windowTitle = "Alt";
+		m_width = ALT_WINDOW_WIDTH;
+		m_height = 370;
+
+		// Callsign and mode centred across the window; the mode reads a size larger.
+		SWindowText t;
+		t.width = m_width;
+		t.text = m_callsign;
+		t.location = { 0, 26 };
+		t.font = &CFontHelper::Segoe14;
+		m_text_.push_back(t);
+		t.text = "Cleared";
+		t.location = { 0, 40 };
+		t.font = &CFontHelper::Segoe16;
+		m_text_.push_back(t);
+
+		SWindowButton b;
+		b.windowID = m_windowId_;
+		b.m_width = 44;
+		b.m_height = 20;
+
+		b.location = { 6, 60 };
+		b.text = "CPDLC";
+		b.m_textcolor = C_MENU_GREY4;   // dim until the opener lights it
+		m_buttons_.push_back(b);
+
+		b.location = { 6, 82 };
+		b.text = "Ground";
+		b.m_textcolor = C_MENU_GREY4;
+		m_buttons_.push_back(b);
+
+		b.location = { 6, 274 };
+		b.text = "Block";
+		m_buttons_.push_back(b);
+
+		b.location = { 6, 296 };
+		b.text = "Pref >";
+		m_buttons_.push_back(b);
+
+		b.location = { 6, 318 };
+		b.text = "WW >";
+		m_buttons_.push_back(b);
+
+		// Green button, white text, as on the real display.
+		b.location = { 6, 342 };
+		b.m_height = 22;
+		b.text = "Submit";
+		b.m_textcolor = C_MENU_TEXT_WHITE;
+		b.m_fillcolor = C_MENU_GREEN;
+		m_buttons_.push_back(b);
+
+		// The list opens with the cleared level highlighted and centred, or the
+		// aircraft's current level when nothing is cleared.
+		const int cleared = fp.GetControllerAssignedData().GetClearedAltitude();
+		int currentFt = 0;
+		if (fp.GetCorrelatedRadarTarget().IsValid()) {
+			currentFt = fp.GetCorrelatedRadarTarget().GetPosition().GetPressureAltitude();
+		}
+		const std::vector<string> rows = SituAltitude::ListRows();
+		const int selected = SituAltitude::RowFor(cleared, currentFt);
+
+		SListBox lb;
+		lb.m_max_elements = SituAltitude::kVisibleRows;
+		lb.m_windowID_ = m_windowId_;
+		lb.selectItem = rows[selected];
+		lb.m_LB_firstElem_idx = SituAltitude::FirstVisibleRow(selected, lb.m_max_elements, (int)rows.size());
+		lb.m_origin = m_origin;
+		lb.PopulateRowsListBox(rows, ALT_WINDOW_LIST_ELEMENT_WIDTH);
+		m_listboxes_.emplace_back(lb);
+
+		STextField entry;
+		entry.m_location_ = { 6, 252 };
+		entry.m_height = 19;
+		entry.m_width = 34;
+		entry.m_text = SituAltitude::EntryFor(cleared);
+		entry.m_parentWindowID = m_windowId_;
+		m_textfields_.push_back(entry);
+	}
+
 	if (winType == WINDOW_POINT_OUT) {
 		windowTitle = "Point Out";
 		m_height = 85;
@@ -441,9 +525,24 @@ SWindowElements CAppWindows::DrawWindow(CDC* dc) {
 	InflateRect(&windowRect, -3, -3);
 	dc->Draw3dRect(&windowRect, C_MENU_GREY2, C_MENU_GREY4);
 
-	dc->DrawText(this->windowTitle.c_str(), &titleRect, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
-	InflateRect(&titleRect, -3, -3);
-	dc->Draw3dRect(&titleRect, C_MENU_GREY2, C_MENU_GREY4);
+	if (m_winType == WINDOW_ALTITUDE) {
+		// The Alt title reads like the highlighted list row on the real display: a light
+		// band with dark text, rather than the grey-on-grey of the other windows.
+		RECT band = titleRect;
+		InflateRect(&band, -3, -3);
+		HBRUSH light = CreateSolidBrush(C_MENU_GREY4);
+		dc->FillRect(&band, CBrush::FromHandle(light));
+		DeleteObject(light);
+		dc->SetTextColor(C_MENU_GREY1);
+		dc->DrawText(this->windowTitle.c_str(), &band, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+		dc->SetTextColor(RGB(230, 230, 230));
+		InflateRect(&titleRect, -3, -3);
+	}
+	else {
+		dc->DrawText(this->windowTitle.c_str(), &titleRect, DT_CENTER | DT_SINGLELINE | DT_VCENTER);
+		InflateRect(&titleRect, -3, -3);
+		dc->Draw3dRect(&titleRect, C_MENU_GREY2, C_MENU_GREY4);
+	}
 
 	// Draw Secondary title if present
 
@@ -454,6 +553,12 @@ SWindowElements CAppWindows::DrawWindow(CDC* dc) {
 	}
 	if (m_winType == WINDOW_DIRECT_TO) {
 		listboxDeltaX = -10;
+	}
+	if (m_winType == WINDOW_ALTITUDE) {
+		// Same inset as Direct To; the list sits below the callsign and the two
+		// buttons above it.
+		listboxDeltaX = -10;
+		listboxDeltaY = 80;
 	}
 	const bool cpdlcList = (m_winType == WINDOW_CPDLC || m_winType == WINDOW_CPDLC_EDITOR);
 	// The scroll bar hangs off the right edge of the list. The CPDLC list is inset by
@@ -794,13 +899,20 @@ void STextField::RenderTextField(CDC* m_dc, POINT origin) {
 void SWindowText::RenderText(CDC* m_dc, POINT origin) {
 	int sDC = m_dc->SaveDC();
 
-	m_dc->SelectObject(CFontHelper::Segoe14);
+	m_dc->SelectObject(font != nullptr ? font : &CFontHelper::Segoe14);
 	m_dc->SetTextColor(C_MENU_TEXT_WHITE);
 
-	// Zero sized to start with; DT_CALCRECT grows it to fit before the text is drawn.
-	RECT r = { origin.x + location.x, origin.y + location.y, origin.x + location.x, origin.y + location.y };
-	m_dc->DrawText(text.c_str(), &r, DT_LEFT | DT_SINGLELINE | DT_CALCRECT);
-	m_dc->DrawText(text.c_str(), &r, DT_LEFT | DT_SINGLELINE);
+	if (width > 0) {
+		// Centred in a band of the given width; the height comes from the font.
+		RECT r = { origin.x + location.x, origin.y + location.y, origin.x + location.x + width, origin.y + location.y + 40 };
+		m_dc->DrawText(text.c_str(), &r, DT_CENTER | DT_SINGLELINE | DT_TOP);
+	}
+	else {
+		// Zero sized to start with; DT_CALCRECT grows it to fit before the text is drawn.
+		RECT r = { origin.x + location.x, origin.y + location.y, origin.x + location.x, origin.y + location.y };
+		m_dc->DrawText(text.c_str(), &r, DT_LEFT | DT_SINGLELINE | DT_CALCRECT);
+		m_dc->DrawText(text.c_str(), &r, DT_LEFT | DT_SINGLELINE);
+	}
 
 	m_dc->RestoreDC(sDC);
 }
